@@ -1,5 +1,32 @@
 import { useState, useMemo, useEffect } from 'react';
 
+const TagsInput = ({ tags, onChange, placeholder, label, colorClass, disabled }) => {
+  const [inputValue, setInputValue] = useState('');
+  const handleKeyDown = (e) => {
+    if (disabled) return;
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      const newTag = inputValue.trim();
+      if (newTag && !tags.includes(newTag)) { onChange([...tags, newTag]); setInputValue(''); }
+    }
+  };
+  return (
+    <div>
+      <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">{label}</label>
+      <div className={`mt-1 p-2 min-h-[42px] rounded-lg border border-slate-300 flex flex-wrap gap-2 focus-within:ring-1 transition-all ${disabled ? 'bg-slate-50 opacity-60' : 'bg-white'} ${colorClass || 'focus-within:border-blue-500 focus-within:ring-blue-500'}`}>
+        {tags.map((tag, index) => (
+          <span key={index} className="bg-slate-800 text-white text-xs font-semibold px-2.5 py-1 rounded-md flex items-center gap-1 shadow-sm">
+            {tag} {!disabled && <button type="button" onClick={() => onChange(tags.filter((_, i) => i !== index))} className="text-slate-300 hover:text-white transition-colors ml-1">✕</button>}
+          </span>
+        ))}
+        {!disabled && (
+          <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={tags.length === 0 ? placeholder : "Escreva e Enter..."} className="flex-1 bg-transparent outline-none text-sm min-w-[120px] text-slate-700" />
+        )}
+      </div>
+    </div>
+  );
+};
+
 function App() {
   // ==========================================
   // 🔗 CONFIGURAÇÕES DE INTEGRAÇÃO (N8N)
@@ -178,10 +205,6 @@ function App() {
   };
 
   const guardarProcessoN8N = async () => {
-    if (getProcessProgress(current) < 100) {
-      alert("⚠️ Preencha todos os campos obrigatórios (incluindo Responsável na RASCI) antes de guardar.");
-      return;
-    }
     if (!activeProject?.spreadsheetId) {
       alert("❌ Erro: ID da planilha não encontrado. O projeto foi criado corretamente?");
       return;
@@ -251,29 +274,6 @@ function App() {
   // ==========================================
   // 🧩 COMPONENTES DE UI
   // ==========================================
-  const TagsInput = ({ tags, onChange, placeholder, label, colorClass }) => {
-    const [inputValue, setInputValue] = useState('');
-    const handleKeyDown = (e) => {
-      if (e.key === 'Enter' || e.key === ',') {
-        e.preventDefault();
-        const newTag = inputValue.trim();
-        if (newTag && !tags.includes(newTag)) { onChange([...tags, newTag]); setInputValue(''); }
-      }
-    };
-    return (
-      <div>
-        <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">{label}</label>
-        <div className={`mt-1 p-2 min-h-[42px] rounded-lg border border-slate-300 bg-white flex flex-wrap gap-2 focus-within:ring-1 transition-all ${colorClass || 'focus-within:border-blue-500 focus-within:ring-blue-500'}`}>
-          {tags.map((tag, index) => (
-            <span key={index} className="bg-slate-800 text-white text-xs font-semibold px-2.5 py-1 rounded-md flex items-center gap-1 shadow-sm">
-              {tag} <button type="button" onClick={() => onChange(tags.filter((_, i) => i !== index))} className="text-slate-300 hover:text-white transition-colors ml-1">✕</button>
-            </span>
-          ))}
-          <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={tags.length === 0 ? placeholder : "Escreva e Enter..."} className="flex-1 bg-transparent outline-none text-sm min-w-[120px] text-slate-700" />
-        </div>
-      </div>
-    );
-  };
 
   const SIPOCColumn = ({ title, items, field, isInput }) => (
     <div className="flex flex-col h-full shadow-sm rounded-xl bg-white border border-slate-200 overflow-hidden">
@@ -475,7 +475,7 @@ function App() {
                   <span className="text-xs text-slate-500 font-medium">
                     {syncStatus[current.id] === 'synced' ? '✅ Salvo na planilha' : '📝 Rascunho local'}
                   </span>
-                  <button onClick={guardarProcessoN8N} disabled={isSubmitting || syncStatus[current.id] === 'synced'} className={`px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center shadow-sm ${syncStatus[current.id] === 'synced' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : (getProcessProgress(current) >= 100 ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200' : 'bg-slate-800 text-white cursor-pointer')}`}>
+                  <button onClick={guardarProcessoN8N} disabled={isSubmitting || syncStatus[current.id] === 'synced'} className={`px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center shadow-sm ${syncStatus[current.id] === 'synced' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200'}`}>
                     {isSubmitting ? '⏳ Salvando...' : (syncStatus[current.id] === 'synced' ? '✅ Salvo' : '💾 Salvar')}
                   </button>
                 </div>
@@ -541,12 +541,17 @@ function App() {
                       <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100"><strong className="text-slate-800 text-base">I</strong><br/>nformado (Avisado)</div>
                     </div>
                   </div>
+                  {mode === 'consultant' && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 text-sm text-amber-700 font-medium">
+                      A Matriz RASCI é preenchida pelo cliente. Alterne para o modo Cliente para editar.
+                    </div>
+                  )}
                   <div className="space-y-5 max-w-3xl">
-                    <TagsInput label="R - Responsável (Executa)" tags={current.rasci.r} onChange={(tags) => updateRasciField('r', tags)} placeholder="Ex: Analista Financeiro" colorClass="focus-within:border-blue-500" />
-                    <TagsInput label="A - Aprovador (Presta Contas)" tags={current.rasci.a} onChange={(tags) => updateRasciField('a', tags)} placeholder="Ex: Diretor Financeiro" colorClass="focus-within:border-purple-500" />
-                    <TagsInput label="S - Suporte (Apoia na execução)" tags={current.rasci.s} onChange={(tags) => updateRasciField('s', tags)} placeholder="Ex: TI" colorClass="focus-within:border-green-500" />
-                    <TagsInput label="C - Consultado (Dá opinião antes)" tags={current.rasci.c} onChange={(tags) => updateRasciField('c', tags)} placeholder="Ex: Jurídico" colorClass="focus-within:border-amber-500" />
-                    <TagsInput label="I - Informado (Avisado depois)" tags={current.rasci.i} onChange={(tags) => updateRasciField('i', tags)} placeholder="Ex: Equipa Comercial" colorClass="focus-within:border-slate-500" />
+                    <TagsInput label="R - Responsável (Executa)" tags={current.rasci.r} onChange={(tags) => updateRasciField('r', tags)} placeholder="Ex: Analista Financeiro" colorClass="focus-within:border-blue-500" disabled={mode === 'consultant'} />
+                    <TagsInput label="A - Aprovador (Presta Contas)" tags={current.rasci.a} onChange={(tags) => updateRasciField('a', tags)} placeholder="Ex: Diretor Financeiro" colorClass="focus-within:border-purple-500" disabled={mode === 'consultant'} />
+                    <TagsInput label="S - Suporte (Apoia na execução)" tags={current.rasci.s} onChange={(tags) => updateRasciField('s', tags)} placeholder="Ex: TI" colorClass="focus-within:border-green-500" disabled={mode === 'consultant'} />
+                    <TagsInput label="C - Consultado (Dá opinião antes)" tags={current.rasci.c} onChange={(tags) => updateRasciField('c', tags)} placeholder="Ex: Jurídico" colorClass="focus-within:border-amber-500" disabled={mode === 'consultant'} />
+                    <TagsInput label="I - Informado (Avisado depois)" tags={current.rasci.i} onChange={(tags) => updateRasciField('i', tags)} placeholder="Ex: Equipa Comercial" colorClass="focus-within:border-slate-500" disabled={mode === 'consultant'} />
                   </div>
                 </div>
               )}
