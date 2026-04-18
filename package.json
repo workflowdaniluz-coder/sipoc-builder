@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:homolog": "vite --mode homolog",
     "build": "vite build",
+    "build:homolog": "vite build --mode homolog",
     "lint": "eslint .",
     "preview": "vite preview"
   },
