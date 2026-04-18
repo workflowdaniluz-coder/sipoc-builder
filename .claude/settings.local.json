@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(vercel --yes)",
+      "Bash(vercel deploy:*)",
+      "Bash(vercel build:*)",
+      "Bash(vercel pull:*)",
+      "Bash(vercel --yes --debug)",
+      "Bash(vercel inspect:*)",
+      "Bash(gh repo:*)",
+      "Bash(git push:*)",
+      "Bash(vercel link:*)",
+      "Bash(vercel project:*)",
+      "Bash(vercel --prod --yes)",
+      "Bash(vercel --prod --yes --force)",
+      "Bash(curl -s https://sipoc-builder.vercel.app/)",
+      "Bash(curl -s \"https://sipoc-builder.vercel.app/assets/index-BO7fORlI.js\")",
+      "Bash(grep -o \"getProcessProgress.\\\\{0,200\\\\}\")",
+      "Bash(grep -o \"100\\\\\\).\\\\{0,80\\\\}\")",
+      "Bash(npm run:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Read(//c/Users/danie/.claude/**)",
+      "Bash(claude plugin:*)",
+      "WebSearch",
+      "Bash(npx vite *)",
+      "Bash(curl -s http://localhost:5173 -o /dev/null -w \"%{http_code}\")"
+    ]
+  }
+}

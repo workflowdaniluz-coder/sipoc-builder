@@ -1,562 +1,1505 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Auth } from '@supabase/auth-ui-react';
+import { ThemeSupa } from '@supabase/auth-ui-shared';
+import { supabase } from './lib/supabase';
+import {
+  criarProjeto, listarProjetos, listarProcessos, salvarProcesso,
+  gerarTokenAcesso, listarTokensDoSetor, revogarToken, buscarSetorPorToken, verificarSenhaToken,
+  deletarProcesso, calcularProgresso, atualizarResponsavelSetor, criarSetor,
+} from './lib/db';
 
-const TagsInput = ({ tags, onChange, placeholder, label, colorClass, disabled }) => {
+const CONSULTORES = [
+  'Guilherme Jesus',
+  'Luana Ferranti',
+  'Eumara Mayra',
+  'Daniela Silveira',
+  'Iélifer Marques',
+];
+import ClientView from './components/ClientView';
+
+// ─────────────────────────────────────────────────────────────────
+// Design tokens & helpers
+// ─────────────────────────────────────────────────────────────────
+
+const SIPOC_COLS = [
+  { key: 'suppliers', label: 'Suppliers',  color: 'bg-amber-500',   ring: 'focus:border-amber-400' },
+  { key: 'inputs',    label: 'Inputs',     color: 'bg-sky-500',     ring: 'focus:border-sky-400',   isInput: true },
+  { key: 'outputs',   label: 'Outputs',    color: 'bg-violet-500',  ring: 'focus:border-violet-400' },
+  { key: 'customers', label: 'Customers',  color: 'bg-emerald-500', ring: 'focus:border-emerald-400' },
+];
+
+const IMPACTO_COLORS = {
+  Alto:  'bg-red-100 text-red-700 border-red-200',
+  Médio: 'bg-amber-100 text-amber-700 border-amber-200',
+  Baixo: 'bg-green-100 text-green-700 border-green-200',
+};
+
+const TIPO_COLORS = {
+  Principal: 'bg-[#ecbf03]/20 text-[#16253e] border-[#ecbf03]/40',
+  Apoio:     'bg-slate-100 text-slate-600 border-slate-200',
+  Gestão:    'bg-purple-100 text-purple-700 border-purple-200',
+};
+
+function getInitials(name = '') {
+  return name.trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+}
+
+const AVATAR_COLORS = [
+  'bg-[#16253e]','bg-[#ecbf03]','bg-emerald-600','bg-violet-600',
+  'bg-rose-600','bg-cyan-700','bg-indigo-700','bg-teal-700',
+];
+function avatarColor(str = '') {
+  let hash = 0;
+  for (const c of str) hash = (hash * 31 + c.charCodeAt(0)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Helper — estado inicial da resposta do cliente
+// ─────────────────────────────────────────────────────────────────
+
+function buildEmptyClienteResposta(processo) {
+  const inputs = {};
+  const outputs = {};
+  (processo.inputs  || []).filter(s => s.trim()).forEach(name => {
+    inputs[name]  = { padronizado: '', ferramentas: [], quem_envia: [], observacoes: '' };
+  });
+  (processo.outputs || []).filter(s => s.trim()).forEach(name => {
+    outputs[name] = { padronizado: '', ferramentas: [], quem_recebe: [], observacoes: '' };
+  });
+  return {
+    inputs,
+    outputs,
+    processo: {
+      periodicidade: '',
+      volume_esforco: '',
+      observacoes_gerais: '',
+      rasci: { Responsável: [], Aprovador: [], Suporte: [], Consultado: [], Informado: [] },
+    },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Componentes base
+// ─────────────────────────────────────────────────────────────────
+
+const TagsInput = ({ tags, onChange, placeholder, label, disabled }) => {
   const [inputValue, setInputValue] = useState('');
   const handleKeyDown = (e) => {
     if (disabled) return;
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
-      const newTag = inputValue.trim();
-      if (newTag && !tags.includes(newTag)) { onChange([...tags, newTag]); setInputValue(''); }
+      const t = inputValue.trim();
+      if (t && !tags.includes(t)) { onChange([...tags, t]); setInputValue(''); }
     }
   };
   return (
     <div>
-      <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">{label}</label>
-      <div className={`mt-1 p-2 min-h-[42px] rounded-lg border border-slate-300 flex flex-wrap gap-2 focus-within:ring-1 transition-all ${disabled ? 'bg-slate-50 opacity-60' : 'bg-white'} ${colorClass || 'focus-within:border-blue-500 focus-within:ring-blue-500'}`}>
-        {tags.map((tag, index) => (
-          <span key={index} className="bg-slate-800 text-white text-xs font-semibold px-2.5 py-1 rounded-md flex items-center gap-1 shadow-sm">
-            {tag} {!disabled && <button type="button" onClick={() => onChange(tags.filter((_, i) => i !== index))} className="text-slate-300 hover:text-white transition-colors ml-1">✕</button>}
+      {label && <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">{label}</label>}
+      <div className={`min-h-[40px] px-2.5 py-2 rounded-lg border flex flex-wrap gap-1.5 transition-all
+        ${disabled ? 'bg-slate-50 border-slate-200 cursor-not-allowed' : 'bg-white border-slate-200 focus-within:border-[#ecbf03] focus-within:ring-2 focus-within:ring-[#ecbf03]/20'}`}>
+        {tags.map((tag, i) => (
+          <span key={i} className="inline-flex items-center gap-1 bg-slate-800 text-white text-xs font-medium px-2.5 py-1 rounded-md">
+            {tag}
+            {!disabled && (
+              <button type="button" onClick={() => onChange(tags.filter((_, idx) => idx !== i))}
+                className="text-slate-400 hover:text-white transition-colors leading-none">×</button>
+            )}
           </span>
         ))}
         {!disabled && (
-          <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} onKeyDown={handleKeyDown} placeholder={tags.length === 0 ? placeholder : "Escreva e Enter..."} className="flex-1 bg-transparent outline-none text-sm min-w-[120px] text-slate-700" />
+          <input value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyDown={handleKeyDown}
+            placeholder={tags.length === 0 ? placeholder : 'Enter para adicionar…'}
+            className="flex-1 bg-transparent outline-none text-sm min-w-[100px] text-slate-700 placeholder:text-slate-400" />
         )}
       </div>
     </div>
   );
 };
 
-function App() {
-  // ==========================================
-  // 🔗 CONFIGURAÇÕES DE INTEGRAÇÃO (N8N)
-  // ==========================================
-  const N8N_BASE_URL = 'https://n8n.srv1496054.hstgr.cloud';
-  
-  // Endpoints
-  const N8N_CRIAR_PROJETO_URL = `${N8N_BASE_URL}/webhook/criar-projeto`;
-  const N8N_SALVAR_PROCESSO_URL = `${N8N_BASE_URL}/webhook-test/salvar-processo`;
-  const N8N_LISTAR_PROJETOS_URL = `${N8N_BASE_URL}/webhook-test/listar-projetos`;
+const Select = ({ label, value, options, onChange, disabled }) => (
+  <div>
+    {label && <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">{label}</label>}
+    <select value={value} onChange={e => onChange(e.target.value)} disabled={disabled}
+      className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700
+                 focus:outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20
+                 disabled:bg-slate-50 disabled:text-slate-400 transition-all">
+      <option value="">— selecione —</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  </div>
+);
 
-  // ==========================================
-  // 🧠 ESTADOS GERAIS (Navegação)
-  // ==========================================
-  const [view, setView] = useState('dashboard'); // 'dashboard' ou 'builder'
-  const [mode, setMode] = useState('consultant'); // 'consultant' ou 'client'
-  const [activeTab, setActiveTab] = useState('sipoc');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [syncStatus, setSyncStatus] = useState({});
-  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+const PADRONIZADO_OPTIONS = [
+  { value: 'sim',     label: 'Sim',     cls: 'bg-emerald-500 border-emerald-500 text-white' },
+  { value: 'parcial', label: 'Parcial', cls: 'bg-amber-500  border-amber-500  text-white' },
+  { value: 'nao',     label: 'Não',     cls: 'bg-red-500    border-red-500    text-white' },
+];
 
-  // ==========================================
-  // 🗂️ LÓGICA DOS PROJETOS (DASHBOARD)
-  // ==========================================
-  const [projetos, setProjetos] = useState(() => {
-    const saved = localStorage.getItem('p_excellence_projects');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [activeProject, setActiveProject] = useState(null);
+const PillSelect = ({ value, onChange }) => (
+  <div className="flex gap-2">
+    {PADRONIZADO_OPTIONS.map(opt => (
+      <button key={opt.value} type="button"
+        onClick={() => onChange(value === opt.value ? '' : opt.value)}
+        className={`px-4 py-1.5 rounded-full text-xs font-bold border transition-all ${
+          value === opt.value
+            ? opt.cls
+            : 'border-slate-200 text-slate-500 bg-white hover:border-slate-300 hover:bg-slate-50'
+        }`}>
+        {opt.label}
+      </button>
+    ))}
+  </div>
+);
+
+const ExpandableCard = ({ isExpanded, onToggle, badge, title, children }) => (
+  <div className={`rounded-xl border transition-all ${isExpanded ? 'border-slate-300 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
+    <button type="button" onClick={onToggle}
+      className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left">
+      <div className="flex items-center gap-3 min-w-0">
+        {badge}
+        <span className="font-semibold text-slate-700 text-sm truncate">{title}</span>
+      </div>
+      <svg className={`w-4 h-4 text-slate-400 transition-transform duration-200 flex-shrink-0 ${isExpanded ? 'rotate-180' : ''}`}
+        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+      </svg>
+    </button>
+    {isExpanded && (
+      <div className="px-5 pb-5 pt-4 space-y-4 border-t border-slate-100">{children}</div>
+    )}
+  </div>
+);
+
+const CFL = ({ children }) => (
+  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">{children}</label>
+);
+
+const MultiChipSelect = ({ options = [], value = [], onChange }) => {
+  const valid = options.filter(o => o.trim());
+  if (valid.length === 0) return <p className="text-xs text-slate-400 py-1">Nenhum cadastrado pelo consultor.</p>;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {valid.map(opt => {
+        const sel = value.includes(opt);
+        return (
+          <button key={opt} type="button"
+            onClick={() => onChange(sel ? value.filter(v => v !== opt) : [...value, opt])}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex items-center gap-1.5
+              ${sel ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-400 hover:bg-slate-50'}`}>
+            {opt}
+            {sel && <span className="opacity-50 leading-none">×</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+// Input inline para RASCI
+const RasciInlineInput = ({ onAdd }) => {
+  const [val, setVal] = useState('');
+  return (
+    <input type="text" value={val}
+      onChange={e => setVal(e.target.value)}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const t = val.trim();
+          if (t) { onAdd(t); setVal(''); }
+        }
+      }}
+      placeholder="+ Adicionar… (Enter)"
+      className="w-full px-2.5 py-1.5 rounded-lg border border-dashed border-slate-200 text-xs
+                 text-slate-500 bg-white outline-none focus:border-[#ecbf03] focus:ring-1
+                 focus:ring-[#ecbf03]/20 transition-all placeholder:text-slate-400" />
+  );
+};
+
+// Coluna do SIPOC — chip input com Enter
+const SIPOCColumn = ({ col, items, globalOutputs, onUpdate }) => {
+  const [inputVal, setInputVal] = useState('');
+  const inputRef = useRef(null);
+  const chips = (items || []).filter(s => s.trim());
+
+  const commit = (text) => {
+    const t = text.trim();
+    if (t && !chips.includes(t)) onUpdate(col.key, [...chips, t]);
+    setInputVal('');
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      commit(inputVal);
+    } else if (e.key === 'Backspace' && !inputVal && chips.length > 0) {
+      onUpdate(col.key, chips.slice(0, -1));
+    }
+  };
+
+  return (
+    <div className="flex flex-col rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+      <div className={`${col.color} px-3 py-2.5 text-center`}>
+        <span className="text-white font-bold text-xs uppercase tracking-widest">{col.label}</span>
+      </div>
+      <div
+        className="flex-1 p-3 bg-white min-h-[220px] flex flex-col gap-2 cursor-text"
+        onClick={() => inputRef.current?.focus()}
+      >
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((chip, idx) => (
+            <span key={idx}
+              className="inline-flex items-center gap-1 bg-slate-800 text-white text-xs font-medium px-2.5 py-1 rounded-md">
+              {chip}
+              <button type="button"
+                onClick={e => { e.stopPropagation(); onUpdate(col.key, chips.filter((_, i) => i !== idx)); }}
+                className="text-slate-400 hover:text-white transition-colors leading-none">×</button>
+            </span>
+          ))}
+        </div>
+        <input
+          ref={inputRef}
+          type="text"
+          list={col.isInput ? 'global-outputs-list' : undefined}
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => { if (inputVal.trim()) commit(inputVal); }}
+          placeholder="Escreva e Enter para adicionar…"
+          className="w-full px-2.5 py-1.5 rounded-lg border border-dashed border-slate-200 text-sm
+                     focus:outline-none focus:border-[#ecbf03] focus:ring-1 focus:ring-[#ecbf03]/20 bg-white
+                     placeholder:text-slate-300 text-slate-700"
+        />
+        {col.isInput && (
+          <datalist id="global-outputs-list">
+            {(globalOutputs || []).map((o, i) => <option key={i} value={o.output} />)}
+          </datalist>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Painel de tokens
+// ─────────────────────────────────────────────────────────────────
+
+const TokenPanel = ({ setorId, setorNome }) => {
+  const [tokens, setTokens] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
 
   useEffect(() => {
-    localStorage.setItem('p_excellence_projects', JSON.stringify(projetos));
-  }, [projetos]);
+    if (!setorId) return;
+    setIsLoading(true);
+    listarTokensDoSetor(setorId)
+      .then(setTokens)
+      .catch(err => alert('Erro ao carregar links: ' + err.message))
+      .finally(() => setIsLoading(false));
+  }, [setorId]);
 
-  // Carrega projetos do n8n ao iniciar
-  const carregarProjetos = async () => {
-    setIsLoadingProjects(true);
+  const handleGerar = async () => {
+    setIsGenerating(true);
     try {
-      const response = await fetch(N8N_LISTAR_PROJETOS_URL);
-      if (!response.ok) throw new Error('Falha ao carregar projetos');
-      const data = await response.json();
-      
-      if (data.success && data.projetos) {
-        // Mescla com projetos locais (mantém spreadsheetId local se existir)
-        const projetosAtualizados = data.projetos.map(p => {
-          const local = projetos.find(lp => lp.empresa === p.empresa);
-          return {
-            id: p.id,
-            empresa: p.empresa,
-            spreadsheetId: local?.spreadsheetId || p.id, // Usa o ID da pasta como fallback
-            spreadsheetUrl: p.folderUrl,
-            dataCriacao: p.createdTime ? new Date(p.createdTime).toLocaleDateString() : 'N/A'
-          };
-        });
-        setProjetos(projetosAtualizados);
-      }
-    } catch (err) {
-      console.error('Erro ao carregar projetos:', err);
-      // Mantém projetos locais se falhar
-    } finally {
-      setIsLoadingProjects(false);
-    }
+      const data = await gerarTokenAcesso(setorId);
+      setTokens(prev => [data, ...prev]);
+      await navigator.clipboard.writeText(data.url);
+      alert(`✅ Link gerado e copiado!\n\nLink: ${data.url}\nSenha: ${data.senha}\n\nEnvie o link e a senha separadamente ao cliente.`);
+    } catch (err) { alert('❌ ' + err.message); }
+    finally { setIsGenerating(false); }
   };
 
-  useEffect(() => {
-    carregarProjetos();
-  }, []);
-
-  const criarNovoProjeto = async (e) => {
-    e.preventDefault();
-    const nomeEmpresa = e.target.empresa.value;
-    if (!nomeEmpresa) return;
-
-    setIsSubmitting(true);
+  const handleRevogar = async (id) => {
+    if (!window.confirm('Revogar este link?')) return;
     try {
-      const response = await fetch(N8N_CRIAR_PROJETO_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ empresa: nomeEmpresa })
-      });
-      
-      if (!response.ok) throw new Error('Falha no Webhook de criação');
-      const data = await response.json();
-      
-      if (!data.success) throw new Error(data.message || 'Erro ao criar projeto');
-      
-      const novoProjeto = {
-        id: `proj_${Date.now()}`,
-        empresa: data.empresa || nomeEmpresa,
-        spreadsheetId: data.spreadsheetId,
-        spreadsheetUrl: data.spreadsheetUrl,
-        dataCriacao: new Date().toLocaleDateString()
-      };
-
-      setProjetos([...projetos, novoProjeto]);
-      e.target.reset();
-      alert(`✅ Projeto "${nomeEmpresa}" criado com sucesso!\n\nPlanilha: ${data.spreadsheetUrl}`);
-    } catch (err) {
-      console.error(err);
-      alert("❌ Erro ao criar projeto. Verifique se o Workflow do n8n está ativo.");
-    } finally {
-      setIsSubmitting(false);
-    }
+      await revogarToken(id);
+      setTokens(prev => prev.map(t => t.id === id ? { ...t, revogado_em: new Date().toISOString() } : t));
+    } catch (err) { alert('❌ ' + err.message); }
   };
 
-  // ==========================================
-  // 📝 LÓGICA DO BUILDER (SIPOC & RASCI)
-  // ==========================================
-  const defaultProcess = {
-    id: 'p1', setor: 'Geral', name: 'Processo Inicial',
-    suppliers: [''], inputs: [''], outputs: [''], customers: [''],
-    ferramentas: [], periodicidade: '', tipo: '', inputsPadronizados: '', outputsPadronizados: '', 
-    geridoDados: '', tecnologia: '', maturidade: '', esforco: '', impacto: '', observacoes: '',
-    rasci: { r: [], a: [], s: [], c: [], i: [] }
+  const handleCopy = async (url, id) => {
+    await navigator.clipboard.writeText(url);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const [processes, setProcesses] = useState([]);
-  const [activeProcessId, setActiveProcessId] = useState(null);
-
-  const selecionarProjeto = (proj) => {
-    setActiveProject(proj);
-    // Tenta carregar processos guardados especificamente para ESTE projeto
-    const savedProcesses = localStorage.getItem(`processes_${proj.id}`);
-    
-    if (savedProcesses) {
-      setProcesses(JSON.parse(savedProcesses));
-      setActiveProcessId(JSON.parse(savedProcesses)[0].id);
-    } else {
-      setProcesses([defaultProcess]);
-      setActiveProcessId('p1');
-    }
-    setView('builder');
-  };
-
-  // Guarda os processos localmente sempre que há alterações (separado por projeto)
-  useEffect(() => {
-    if (activeProject && processes.length > 0) {
-      localStorage.setItem(`processes_${activeProject.id}`, JSON.stringify(processes));
-    }
-  }, [processes, activeProject]);
-
-  const activeProcessIndex = processes.findIndex(p => p.id === activeProcessId);
-  const current = processes[activeProcessIndex] || defaultProcess;
-
-  const processosPorSetor = useMemo(() => {
-    return processes.reduce((acc, curr) => {
-      if (!acc[curr.setor]) acc[curr.setor] = [];
-      acc[curr.setor].push(curr);
-      return acc;
-    }, {});
-  }, [processes]);
-
-  const globalOutputs = useMemo(() => {
-    return processes.flatMap(p => 
-      p.outputs.filter(o => o.trim() !== '').map(out => ({ processo: p.name, output: out }))
-    );
-  }, [processes]);
-
-  const camposObrigatoriosSIPOC = [
-    'periodicidade', 'tipo', 'inputsPadronizados', 'outputsPadronizados', 
-    'geridoDados', 'tecnologia', 'maturidade', 'esforco', 'impacto'
-  ];
-
-  const getProcessProgress = (proc) => {
-    let filled = camposObrigatoriosSIPOC.filter(f => proc[f] !== '').length;
-    if (proc.ferramentas && proc.ferramentas.length > 0) filled += 1;
-    if (proc.rasci && proc.rasci.r.length > 0) filled += 1;
-    return Math.round((filled / (camposObrigatoriosSIPOC.length + 2)) * 100);
-  };
-
-  const markAsDraft = () => {
-    if (syncStatus[activeProcessId] === 'synced') {
-      setSyncStatus(prev => ({ ...prev, [activeProcessId]: 'draft' }));
-    }
-  };
-
-  const guardarProcessoN8N = async () => {
-    if (!activeProject?.spreadsheetId) {
-      alert("❌ Erro: ID da planilha não encontrado. O projeto foi criado corretamente?");
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    // Payload ajustado para bater com as colunas da planilha
-    const payload = {
-      spreadsheetId: activeProject.spreadsheetId,
-      processo: {
-        "ID": current.id,
-        "Supplier": current.suppliers.filter(s => s.trim()).join(' | '),
-        "Input": current.inputs.filter(i => i.trim()).join(' | '),
-        "Processos": current.name,
-        "Output": current.outputs.filter(o => o.trim()).join(' | '),
-        "Customer": current.customers.filter(c => c.trim()).join(' | '),
-        "Área executora": current.setor,
-        "Periodicidade": current.periodicidade,
-        "Ferramentas": current.ferramentas.join(' | '),
-        "Inputs padronizados?": current.inputsPadronizados,
-        "Outputs padronizados?": current.outputsPadronizados,
-        "Gerido através de dados?": current.geridoDados,
-        "Classificação Técnologia": current.tecnologia,
-        "Maturidade do processo": current.maturidade,
-        "Volume e esforço": current.esforco,
-        "Tipo": current.tipo,
-        "Impacto no negócio": current.impacto,
-        "Observações": current.observacoes,
-        "Responsável": current.rasci.r.join(' | '),
-        "Aprovador": current.rasci.a.join(' | '),
-        "Suporte": current.rasci.s.join(' | '),
-        "Consultado": current.rasci.c.join(' | '),
-        "Informado": current.rasci.i.join(' | ')
-      }
-    };
-
-    try {
-      const response = await fetch(N8N_SALVAR_PROCESSO_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      
-      if (!response.ok) throw new Error('Falha ao comunicar com o n8n');
-      
-      const data = await response.json();
-      if (!data.success) throw new Error(data.message || 'Erro ao salvar');
-      
-      setSyncStatus(prev => ({ ...prev, [current.id]: 'synced' }));
-      alert('✅ Processo salvo na planilha!');
-    } catch (error) {
-      console.error(error);
-      alert("❌ Erro ao guardar na base de dados. Verifique se o Workflow está ativo.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Funções de Manipulação
-  const updateProcessField = (field, value) => { markAsDraft(); const updated = [...processes]; updated[activeProcessIndex][field] = value; setProcesses(updated); };
-  const updateRasciField = (letter, tags) => { markAsDraft(); const updated = [...processes]; updated[activeProcessIndex].rasci[letter] = tags; setProcesses(updated); };
-  const updateArrayItem = (field, index, value) => { markAsDraft(); const updated = [...processes]; updated[activeProcessIndex][field][index] = value; setProcesses(updated); };
-  const removeArrayItem = (field, index) => { markAsDraft(); const updated = [...processes]; if (updated[activeProcessIndex][field].length > 1) { updated[activeProcessIndex][field].splice(index, 1); setProcesses(updated); } };
-  const addArrayItem = (field) => { markAsDraft(); const updated = [...processes]; updated[activeProcessIndex][field] = [...updated[activeProcessIndex][field], '']; setProcesses(updated); };
-
-  // ==========================================
-  // 🧩 COMPONENTES DE UI
-  // ==========================================
-
-  const SIPOCColumn = ({ title, items, field, isInput }) => (
-    <div className="flex flex-col h-full shadow-sm rounded-xl bg-white border border-slate-200 overflow-hidden">
-      <div className="text-center py-2 bg-slate-800 text-white font-bold text-xs uppercase tracking-wider">{title}</div>
-      <div className="flex-1 p-3 space-y-2 bg-slate-50 min-h-[250px]">
-        {items.map((item, idx) => (
-          <div key={idx} className="flex gap-1 group relative">
-            {isInput ? (
-              <div className="flex-1 relative">
-                <input type="text" list="global-outputs-list" value={item} onChange={(e) => updateArrayItem(field, idx, e.target.value)} placeholder="Escreva..." className="w-full px-2 py-1.5 rounded border border-slate-300 text-sm focus:outline-none focus:border-blue-500 bg-white" />
-                <datalist id="global-outputs-list">{globalOutputs.map((out, i) => <option key={i} value={out.output}>Saída de: {out.processo}</option>)}</datalist>
-              </div>
-            ) : (
-              <input type="text" value={item} onChange={(e) => updateArrayItem(field, idx, e.target.value)} placeholder={`${title}...`} className="flex-1 px-2 py-1.5 rounded border border-slate-300 text-sm focus:outline-none focus:border-blue-500 bg-white" />
-            )}
-            {items.length > 1 && <button onClick={() => removeArrayItem(field, idx)} className="opacity-0 group-hover:opacity-100 px-2 text-red-500 hover:text-red-700 absolute right-0 top-1">✕</button>}
-          </div>
-        ))}
-        <button onClick={() => addArrayItem(field)} className="w-full py-2 rounded border border-dashed border-slate-300 text-xs font-semibold text-slate-500 hover:bg-slate-100 mt-2">+ Adicionar</button>
+  if (!setorId) return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="text-center max-w-xs">
+        <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3 text-xl">🔗</div>
+        <p className="font-semibold text-slate-600 text-sm">Salve o processo primeiro</p>
+        <p className="text-xs text-slate-400 mt-1">Os links são gerados por setor. Salve qualquer processo deste setor para liberar.</p>
       </div>
     </div>
   );
 
-  const SelectField = ({ label, value, field, options }) => (
-    <div>
-      <label className="text-xs font-bold text-slate-600 uppercase tracking-wide">{label}</label>
-      <select value={value} onChange={(e) => updateProcessField(field, e.target.value)} className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 focus:ring-1 outline-none bg-white">
-        <option value="">Selecione...</option>
-        {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-      </select>
+  return (
+    <div className="space-y-6">
+      <div className="bg-gradient-to-br from-[#ecbf03]/8 to-[#16253e]/5 border border-[#ecbf03]/25 rounded-2xl p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-slate-800 mb-1">Link de acesso — <span className="text-[#ecbf03]">{setorNome}</span></h3>
+            <p className="text-sm text-slate-500">Envie ao cliente para preencher os processos deste setor. Válido por 90 dias, sem necessidade de login.</p>
+          </div>
+          <button onClick={handleGerar} disabled={isGenerating}
+            className="flex-shrink-0 bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-5 py-2.5 rounded-xl
+                       font-bold text-sm transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30 whitespace-nowrap">
+            {isGenerating ? 'Gerando…' : '+ Gerar link'}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Histórico de links</p>
+        {isLoading ? (
+          <div className="text-sm text-slate-400 text-center py-8">Carregando…</div>
+        ) : tokens.length === 0 ? (
+          <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">
+            Nenhum link gerado para este setor.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {tokens.map(t => {
+              const revogado = !!t.revogado_em;
+              const expirado = new Date(t.expira_em) < new Date();
+              const ativo = !revogado && !expirado;
+              const badge = revogado ? { label: 'Revogado', cls: 'bg-red-100 text-red-600' }
+                : expirado ? { label: 'Expirado', cls: 'bg-slate-100 text-slate-500' }
+                : t.usado_em ? { label: 'Usado', cls: 'bg-green-100 text-green-700' }
+                : { label: 'Ativo', cls: 'bg-[#ecbf03]/20 text-[#16253e]' };
+              return (
+                <div key={t.id} className={`flex items-center gap-3 p-4 rounded-xl border transition-all
+                  ${ativo ? 'bg-white border-slate-200 hover:border-slate-300' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${badge.cls}`}>{badge.label}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-mono text-xs text-slate-500 truncate">{t.url}</p>
+                    <div className="flex items-center gap-3 mt-0.5">
+                      <p className="text-[10px] text-slate-400">
+                        Criado {new Date(t.criado_em).toLocaleDateString('pt-BR')} · Expira {new Date(t.expira_em).toLocaleDateString('pt-BR')}
+                      </p>
+                      {t.senha && (
+                        <span className="text-[10px] font-black tracking-widest text-slate-600 bg-slate-100 px-2 py-0.5 rounded font-mono">
+                          {t.senha}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {ativo && (
+                    <div className="flex gap-2 flex-shrink-0">
+                      <button onClick={() => handleCopy(t.url, t.id)}
+                        className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600
+                                   hover:bg-slate-50 transition-all">
+                        {copiedId === t.id ? '✅ Copiado' : 'Copiar'}
+                      </button>
+                      <button onClick={() => handleRevogar(t.id)}
+                        className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-semibold text-red-500
+                                   hover:bg-red-50 transition-all">
+                        Revogar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Password gate (acesso do cliente)
+// ─────────────────────────────────────────────────────────────────
+
+const PasswordGate = ({ token, onSuccess }) => {
+  const [senha, setSenha] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!senha.trim()) return;
+    setLoading(true); setError('');
+    try {
+      const ok = await verificarSenhaToken(token, senha.trim().toUpperCase());
+      if (ok) onSuccess();
+      else setError('Senha incorreta. Verifique com o consultor.');
+    } catch (err) { setError(err.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <input
+        type="text"
+        value={senha}
+        onChange={e => setSenha(e.target.value.toUpperCase())}
+        placeholder="Ex: XK4R9M"
+        maxLength={6}
+        className="w-full px-4 py-3 rounded-xl border border-slate-200 text-center text-2xl font-black
+                   tracking-[0.3em] uppercase outline-none focus:border-[#ecbf03] focus:ring-2
+                   focus:ring-[#ecbf03]/20 transition-all placeholder:text-slate-300 placeholder:text-base
+                   placeholder:font-normal placeholder:tracking-normal"
+      />
+      {error && <p className="text-sm text-red-500 text-center font-medium">{error}</p>}
+      <button type="submit" disabled={loading || senha.length < 1}
+        className="w-full bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] py-3 rounded-xl font-bold
+                   text-sm transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30">
+        {loading ? 'Verificando…' : 'Acessar'}
+      </button>
+    </form>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────────
+
+function App() {
+  // ── Auth ──────────────────────────────────────
+  const [appMode, setAppMode]       = useState('loading');
+  const [session, setSession]       = useState(null);
+  const [clientData, setClientData] = useState(null);
+  const [senhaVerificada, setSenhaVerificada] = useState(false);
+
+  useEffect(() => {
+    const init = async () => {
+      // Consultor autenticado tem sempre prioridade
+      const { data: { session: s } } = await supabase.auth.getSession();
+      if (s) { setSession(s); setAppMode('consultant'); return; }
+
+      // Só verifica token de cliente se não houver sessão de consultor
+      const params = new URLSearchParams(window.location.search);
+      const tokenFromUrl = params.get('t');
+      if (tokenFromUrl) {
+        localStorage.setItem('sipoc_client_token', tokenFromUrl);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+      const saved = localStorage.getItem('sipoc_client_token');
+      if (saved) {
+        try {
+          const td = await buscarSetorPorToken(saved);
+          if (td) {
+            setClientData({ tokenId: td.id, token: saved, setorId: td.setor_id, setorNome: td.setor_nome, clienteNome: td.cliente_nome, has_senha: td.has_senha });
+            if (!td.has_senha) setSenhaVerificada(true);
+            setAppMode('client'); return;
+          }
+        } catch { }
+        localStorage.removeItem('sipoc_client_token');
+      }
+      setAppMode('auth');
+    };
+    init();
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      setAppMode(prev => {
+        if (prev === 'loading') return prev;        // init() ainda não terminou — não interferir
+        if (s) return 'consultant';                 // sessão ativa → sempre consultor
+        return prev === 'client' ? prev : 'auth';  // sem sessão → manter cliente ou ir p/ login
+      });
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    localStorage.removeItem('sipoc_client_token');
+  };
+
+  // ── Navegação ─────────────────────────────────
+  const [view, setView]           = useState('dashboard');
+  const [mode, setMode]           = useState('consultant');
+  const [activeTab, setActiveTab] = useState('sipoc');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [syncStatus, setSyncStatus]     = useState({});
+
+  // ── Auto-save refs ────────────────────────────
+  const currentRef       = useRef(null);
+  const activeProjectRef = useRef(null);
+  const autoSaveTimer    = useRef(null);
+
+  // ── Dashboard ─────────────────────────────────
+  const [projetos, setProjetos]             = useState([]);
+  const [activeProject, setActiveProject]   = useState(null);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+
+  const carregarProjetos = async () => {
+    setIsLoadingProjects(true);
+    try { setProjetos(await listarProjetos()); }
+    catch (err) { alert('Não foi possível carregar os projetos: ' + err.message); }
+    finally { setIsLoadingProjects(false); }
+  };
+
+  useEffect(() => { if (appMode === 'consultant') carregarProjetos(); }, [appMode]);
+
+  const criarNovoProjeto = async (e) => {
+    e.preventDefault();
+    const nome = e.target.empresa.value.trim();
+    if (!nome) return;
+    setIsSubmitting(true);
+    try {
+      const p = await criarProjeto(nome);
+      setProjetos(prev => [p, ...prev]);
+      e.target.reset();
+      alert(`✅ Projeto "${nome}" criado!`);
+    } catch (err) { alert('❌ ' + err.message); }
+    finally { setIsSubmitting(false); }
+  };
+
+  // ── Builder ───────────────────────────────────
+  const defaultProcess = {
+    id: 'p1', supabase_id: null, setor: 'Geral', setor_id: null,
+    name: 'Novo Processo',
+    suppliers: [''], inputs: [''], outputs: [''], customers: [''],
+    ferramentas: [], periodicidade: '', tipo: '', inputsPadronizados: '',
+    outputsPadronizados: '', geridoDados: '', tecnologia: '',
+    maturidade: '', esforco: '', impacto: '', observacoes: '',
+    rasci: { r: [], a: [], s: [], c: [], i: [] },
+  };
+
+  const [processes, setProcesses]             = useState([]);
+  const [activeProcessId, setActiveProcessId] = useState(null);
+  const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
+  const [clienteExpInputs,  setClienteExpInputs]  = useState({});
+  const [clienteExpOutputs, setClienteExpOutputs] = useState({});
+  const [setorResponsavel, setSetorResponsavel]   = useState({}); // { setor_id: nome }
+  const [setorDropdownOpen, setSetorDropdownOpen] = useState(null); // setor_id aberto
+  const [filtroResponsavel, setFiltroResponsavel] = useState('');
+  const [novoSetorModal, setNovoSetorModal]       = useState(false);
+  const [novoSetorNome,  setNovoSetorNome]        = useState('');
+  const [novoSetorResp,  setNovoSetorResp]        = useState('');
+
+  const selecionarProjeto = async (proj) => {
+    setActiveProject(proj); setView('builder');
+    setSyncStatus({}); setActiveTab('sipoc'); setIsLoadingProcesses(true);
+    try {
+      const procs = await listarProcessos(proj.id);
+      if (procs.length > 0) {
+        setProcesses(procs); setActiveProcessId(procs[0].id);
+        const s = {}; procs.forEach(p => { s[p.id] = 'synced'; }); setSyncStatus(s);
+        // Popula responsáveis por setor
+        const resp = {};
+        procs.forEach(p => { if (p.setor_id && p.setor_responsavel) resp[p.setor_id] = p.setor_responsavel; });
+        setSetorResponsavel(resp);
+      } else { setProcesses([defaultProcess]); setActiveProcessId('p1'); }
+    } catch (err) {
+      alert('❌ ' + err.message);
+      setProcesses([defaultProcess]); setActiveProcessId('p1');
+    } finally { setIsLoadingProcesses(false); }
+  };
+
+  const handleResponsavelChange = async (setorId, nome) => {
+    setSetorResponsavel(prev => ({ ...prev, [setorId]: nome }));
+    try { await atualizarResponsavelSetor(setorId, nome || null); }
+    catch (err) { alert('❌ ' + err.message); }
+  };
+
+  const handleCriarSetor = async () => {
+    const nome = novoSetorNome.trim() || 'Geral';
+    if (!activeProject?.id) return;
+    try {
+      const setor = await criarSetor(activeProject.id, nome, novoSetorResp || null);
+      const newId = `p${Date.now()}`;
+      setProcesses(prev => [...prev, {
+        ...defaultProcess, id: newId, supabase_id: null,
+        name: 'Novo Processo', setor: setor.nome, setor_id: setor.id,
+      }]);
+      if (novoSetorResp) setSetorResponsavel(prev => ({ ...prev, [setor.id]: novoSetorResp }));
+      setActiveProcessId(newId);
+      setNovoSetorModal(false); setNovoSetorNome(''); setNovoSetorResp('');
+    } catch (err) { alert('❌ ' + err.message); }
+  };
+
+  const activeProcessIndex = processes.findIndex(p => p.id === activeProcessId);
+  const current = processes[activeProcessIndex] || defaultProcess;
+
+  // Reset client card expand state when active process changes
+  useEffect(() => {
+    const inputKeys  = (current.inputs  || []).filter(s => s.trim());
+    const outputKeys = (current.outputs || []).filter(s => s.trim());
+    setClienteExpInputs( inputKeys.length  > 0 ? { [inputKeys[0]]:  true } : {});
+    setClienteExpOutputs(outputKeys.length > 0 ? { [outputKeys[0]]: true } : {});
+  }, [activeProcessId]); // eslint-disable-line
+
+  const processosPorSetor = useMemo(() =>
+    processes.reduce((acc, p) => { (acc[p.setor] ??= []).push(p); return acc; }, {}), [processes]);
+
+  const globalOutputs = useMemo(() =>
+    processes.flatMap(p => p.outputs.filter(o => o.trim()).map(o => ({ processo: p.name, output: o }))), [processes]);
+
+  const progresso = useMemo(() => {
+    const map = {};
+    processes.forEach(p => { map[p.id] = calcularProgresso(p); });
+    return map;
+  }, [processes]);
+
+  // Mantém refs sempre atualizados para uso no auto-save
+  useEffect(() => { currentRef.current = current; }, [current]);
+  useEffect(() => { activeProjectRef.current = activeProject; }, [activeProject]);
+
+  const scheduleAutoSave = useCallback(() => {
+    clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(async () => {
+      const proc = currentRef.current;
+      const proj = activeProjectRef.current;
+      if (!proj?.id) return;
+      if (!proc?.supabase_id || proc.supabase_id.startsWith('p')) return;
+      try {
+        setSyncStatus(prev => ({ ...prev, [proc.id]: 'saving' }));
+        const { supabase_id, setor_id } = await salvarProcesso(proj.id, proc);
+        setProcesses(prev => prev.map(p => p.id === proc.id ? { ...p, supabase_id, setor_id, id: supabase_id } : p));
+        setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }));
+        setActiveProcessId(supabase_id);
+      } catch (err) {
+        console.error('Auto-save falhou:', err.message);
+        setSyncStatus(prev => ({ ...prev, [proc.id]: 'draft' }));
+      }
+    }, 2000);
+  }, []);
+
+  const markDraft = () => {
+    setSyncStatus(prev => ({ ...prev, [activeProcessId]: 'draft' }));
+    scheduleAutoSave();
+  };
+
+  const guardar = async () => {
+    if (!activeProject?.id) { alert('Projeto não selecionado.'); return; }
+    clearTimeout(autoSaveTimer.current);
+    setIsSubmitting(true);
+    try {
+      const { supabase_id, setor_id } = await salvarProcesso(activeProject.id, current);
+      setProcesses(prev => prev.map(p => p.id === current.id ? { ...p, supabase_id, setor_id, id: supabase_id } : p));
+      setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }));
+      setActiveProcessId(supabase_id);
+    } catch (err) { alert('❌ ' + err.message); }
+    finally { setIsSubmitting(false); }
+  };
+
+  const excluirProcesso = async () => {
+    if (!window.confirm(`Excluir o processo "${current.name}"?\n\nEsta ação não pode ser desfeita.`)) return;
+    clearTimeout(autoSaveTimer.current);
+    const isNew = !current.supabase_id || current.supabase_id.startsWith('p');
+    if (!isNew) {
+      try { await deletarProcesso(current.supabase_id); }
+      catch (err) { alert('❌ ' + err.message); return; }
+    }
+    const remaining = processes.filter(p => p.id !== current.id);
+    if (remaining.length === 0) {
+      const newId = `p${Date.now()}`;
+      setProcesses([{ ...defaultProcess, id: newId }]);
+      setActiveProcessId(newId);
+    } else {
+      setProcesses(remaining);
+      setActiveProcessId(remaining[0].id);
+    }
+    setSyncStatus(prev => { const s = { ...prev }; delete s[current.id]; return s; });
+  };
+
+  const upd   = (f, v) => { markDraft(); const u = [...processes]; u[activeProcessIndex][f] = v; setProcesses(u); };
+  const updRasci = (l, tags) => { markDraft(); const u = [...processes]; u[activeProcessIndex].rasci[l] = tags; setProcesses(u); };
+
+  // ── Helpers de resposta do cliente ───────────
+  const getRC = () => {
+    const rc = current.respostas_cliente;
+    return (rc && Object.keys(rc).length > 0) ? rc : buildEmptyClienteResposta(current);
+  };
+  const updCI  = (name, field, val) => { const rc = getRC(); upd('respostas_cliente', { ...rc, inputs:  { ...rc.inputs,  [name]: { ...rc.inputs[name],  [field]: val } } }); };
+  const updCO  = (name, field, val) => { const rc = getRC(); upd('respostas_cliente', { ...rc, outputs: { ...rc.outputs, [name]: { ...rc.outputs[name], [field]: val } } }); };
+  const updCP  = (field, val)       => { const rc = getRC(); upd('respostas_cliente', { ...rc, processo: { ...rc.processo, [field]: val } }); };
+  const updCR  = (papel, tags)      => { const rc = getRC(); upd('respostas_cliente', { ...rc, processo: { ...rc.processo, rasci: { ...rc.processo.rasci, [papel]: tags } } }); };
+  const togCI  = (name) => setClienteExpInputs( p => ({ ...p, [name]: !p[name] }));
+  const togCO  = (name) => setClienteExpOutputs(p => ({ ...p, [name]: !p[name] }));
+  const updArr   = (f, i, v) => { markDraft(); const u = [...processes]; u[activeProcessIndex][f][i] = v; setProcesses(u); };
+  const rmArr    = (f, i)    => { markDraft(); const u = [...processes]; if (u[activeProcessIndex][f].length > 1) { u[activeProcessIndex][f].splice(i,1); setProcesses(u); } };
+  const addArr   = (f)       => { markDraft(); const u = [...processes]; u[activeProcessIndex][f] = [...u[activeProcessIndex][f], '']; setProcesses(u); };
+
+  // ─────────────────────────────────────────────
+  // Roteamento
+  // ─────────────────────────────────────────────
+
+  if (appMode === 'loading') return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="flex items-center gap-3 text-slate-400">
+        <div className="w-5 h-5 border-2 border-[#ecbf03] border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm">Carregando…</span>
+      </div>
     </div>
   );
 
-  // ==========================================
-  // 🖥️ RENDERIZAÇÃO DA PÁGINA
-  // ==========================================
-  return (
-    <div className="min-h-screen bg-slate-100 font-sans text-slate-800 flex flex-col">
-      {/* HEADER */}
-      <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 bg-blue-600 text-white rounded-lg flex items-center justify-center font-bold text-xl shadow-inner">P</div>
-            <div>
-              <h1 className="text-xl font-bold text-white tracking-tight">P-EXCELLENCE</h1>
-              <p className="text-xs text-slate-400 font-medium tracking-wide">
-                {view === 'dashboard' ? 'Painel do Consultor' : `CLIENTE: ${activeProject?.empresa}`}
-              </p>
-            </div>
+  if (appMode === 'client' && !senhaVerificada) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#16253e] via-[#1e3257] to-[#0d1927] flex items-center justify-center p-6">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center gap-3 mb-8">
+            <img src="/logo-mark.png" alt="P-Excellence" className="h-16 w-auto" />
+            <p className="text-xs text-slate-400 font-medium tracking-widest uppercase">SIPOC Builder</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="bg-white rounded-2xl shadow-2xl shadow-slate-900/40 p-8">
+            <h2 className="text-lg font-bold text-slate-800 mb-1">Acesso protegido</h2>
+            <p className="text-sm text-slate-400 mb-6">Insira a senha fornecida pelo consultor para continuar.</p>
+            <PasswordGate token={clientData?.token} onSuccess={() => setSenhaVerificada(true)} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (appMode === 'client') return <ClientView clientData={clientData} />;
+
+  if (appMode === 'auth') return (
+    <div className="min-h-screen bg-gradient-to-br from-[#16253e] via-[#1e3257] to-[#0d1927] flex items-center justify-center p-6">
+      <div className="w-full max-w-md">
+        <div className="flex flex-col items-center gap-3 mb-8">
+          <img src="/logo-mark.png" alt="P-Excellence" className="h-16 w-auto" />
+          <p className="text-xs text-slate-400 font-medium tracking-widest uppercase">SIPOC Builder</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-2xl shadow-slate-900/40 p-8">
+          <Auth supabaseClient={supabase} appearance={{ theme: ThemeSupa }} providers={[]}
+            view="sign_in" showLinks={false}
+            localization={{ variables: {
+              sign_in: { email_label: 'Email', password_label: 'Senha', button_label: 'Entrar' },
+            }}} />
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Consultor autenticado ─────────────────────
+  const isSynced  = syncStatus[current.id] === 'synced';
+  const isSaving  = syncStatus[current.id] === 'saving';
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 flex flex-col">
+
+      {/* ── Header ── */}
+      <header className="bg-[#16253e] sticky top-0 z-40">
+        <div className="max-w-screen-xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/logo-positive.png" alt="P-Excellence" className="h-8 w-auto" />
             {view === 'builder' && (
-              <button onClick={() => setView('dashboard')} className="text-xs text-slate-300 hover:text-white font-medium underline">
-                ← Voltar ao Dashboard
+              <>
+                <span className="text-slate-600 text-sm mx-1">/</span>
+                <span className="text-slate-300 text-sm font-medium">{activeProject?.empresa}</span>
+              </>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            {view === 'builder' && (
+              <button onClick={() => setView('dashboard')}
+                className="text-xs text-slate-400 hover:text-white transition-colors font-medium flex items-center gap-1">
+                ← Dashboard
               </button>
             )}
-            <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-              <button onClick={() => setMode('consultant')} className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${mode === 'consultant' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>Consultor</button>
-              <button onClick={() => setMode('client')} className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-all ${mode === 'client' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>Cliente</button>
-            </div>
+            {view === 'builder' && (
+              <div className="flex bg-slate-800 rounded-lg p-0.5 border border-slate-700">
+                {['consultant','client'].map(m => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all
+                      ${mode === m ? 'bg-[#ecbf03] text-[#16253e]' : 'text-slate-400 hover:text-white'}`}>
+                    {m === 'consultant' ? 'Consultor' : 'Cliente'}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={handleLogout}
+              className="text-xs text-slate-500 hover:text-red-400 transition-colors font-medium">
+              Sair
+            </button>
           </div>
         </div>
       </header>
 
-      {/* VIEW: DASHBOARD */}
+      {/* ══ DASHBOARD ══ */}
       {view === 'dashboard' && (
-        <main className="max-w-5xl mx-auto w-full p-8 space-y-8 flex-1">
-          <section className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
-            <h2 className="text-xl font-bold mb-6 text-slate-800 flex items-center gap-2">🚀 Iniciar Novo Projeto</h2>
-            <form onSubmit={criarNovoProjeto} className="flex gap-4">
-              <input name="empresa" placeholder="Nome da Empresa Cliente" className="flex-1 px-4 py-3 rounded-xl border border-slate-300 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" required />
-              <button type="submit" disabled={isSubmitting} className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all disabled:opacity-50">
-                {isSubmitting ? 'Criando...' : 'Criar Projeto'}
+        <main className="max-w-screen-md mx-auto w-full px-6 py-10 space-y-10 flex-1">
+
+          {/* New project */}
+          <section>
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Novo Projeto</h2>
+            <form onSubmit={criarNovoProjeto}
+              className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex gap-3">
+              <input name="empresa" required placeholder="Nome da empresa cliente"
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none
+                           focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all bg-slate-50
+                           placeholder:text-slate-400" />
+              <button type="submit" disabled={isSubmitting}
+                className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-6 py-2.5 rounded-xl font-bold
+                           text-sm transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30 whitespace-nowrap">
+                {isSubmitting ? 'Criando…' : 'Criar projeto'}
               </button>
             </form>
           </section>
 
+          {/* Projects list */}
           <section>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest">Projetos em Andamento</h2>
-              <button 
-                onClick={carregarProjetos} 
-                disabled={isLoadingProjects}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-              >
-                {isLoadingProjects ? '⏳ Carregando...' : '🔄 Atualizar lista'}
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                Projetos ativos
+                {projetos.length > 0 && <span className="ml-2 text-[#ecbf03]">{projetos.length}</span>}
+              </h2>
+              <button onClick={carregarProjetos} disabled={isLoadingProjects}
+                className="text-xs text-slate-400 hover:text-[#ecbf03] font-medium transition-colors flex items-center gap-1">
+                {isLoadingProjects ? 'Carregando…' : '↻ Atualizar'}
               </button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {projetos.map(p => (
-                <div key={p.id} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-500 hover:shadow-md transition-all cursor-pointer group" onClick={() => selecionarProjeto(p)}>
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <h3 className="font-bold text-lg text-slate-800 group-hover:text-blue-600 transition-colors">{p.empresa}</h3>
-                      <p className="text-xs text-slate-400 mt-1">Criado em: {p.dataCriacao}</p>
+
+            {projetos.length === 0 ? (
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
+                <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3 text-xl">🏢</div>
+                <p className="font-semibold text-slate-500 text-sm">
+                  {isLoadingProjects ? 'Carregando projetos…' : 'Nenhum projeto ainda. Crie o primeiro acima.'}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {projetos.map(p => (
+                  <button key={p.id} onClick={() => selecionarProjeto(p)}
+                    className="group text-left bg-white rounded-2xl border border-slate-200 shadow-sm p-5
+                               hover:border-[#ecbf03]/60 hover:shadow-md transition-all">
+                    <div className="flex items-start gap-4">
+                      <div className={`w-11 h-11 rounded-xl flex-shrink-0 flex items-center justify-center
+                                      font-black text-white text-sm ${avatarColor(p.empresa)}`}>
+                        {getInitials(p.empresa)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-800 group-hover:text-[#ecbf03] transition-colors truncate">{p.empresa}</p>
+                        <p className="text-xs text-slate-400 mt-0.5">{p.dataCriacao}</p>
+                      </div>
+                      <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
+                        ATIVO
+                      </span>
                     </div>
-                    <span className="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded-full font-bold border border-green-200">ATIVO</span>
-                  </div>
-                  <div className="text-xs text-slate-500 bg-slate-50 p-2 rounded truncate border border-slate-100">
-                    📊 ID: {p.spreadsheetId?.substring(0, 20)}...
-                  </div>
-                  {p.spreadsheetUrl && (
-                    <a 
-                      href={p.spreadsheetUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs text-blue-500 hover:text-blue-700 mt-2 inline-block"
-                    >
-                      🔗 Abrir Planilha
-                    </a>
-                  )}
-                </div>
-              ))}
-              {projetos.length === 0 && (
-                <div className="col-span-2 text-center p-10 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400">
-                  {isLoadingProjects ? '⏳ Carregando projetos...' : 'Nenhum projeto registado. Crie o seu primeiro cliente acima.'}
-                </div>
-              )}
-            </div>
+                    <div className="mt-4 space-y-1.5">
+                      {p.avgConsultor !== undefined ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 w-8 flex-shrink-0 font-medium">Cons.</span>
+                            <div className="flex-1 bg-slate-100 rounded-full h-1.5">
+                              <div className={`h-1.5 rounded-full transition-all ${p.avgConsultor >= 80 ? 'bg-green-500' : p.avgConsultor >= 40 ? 'bg-amber-500' : 'bg-red-400'}`}
+                                style={{ width: `${p.avgConsultor}%` }} />
+                            </div>
+                            <span className={`text-[10px] font-bold w-7 text-right flex-shrink-0 ${p.avgConsultor >= 80 ? 'text-green-600' : p.avgConsultor >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+                              {p.avgConsultor}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-400 w-8 flex-shrink-0 font-medium">Cli.</span>
+                            <div className="flex-1 bg-slate-100 rounded-full h-1.5">
+                              <div className={`h-1.5 rounded-full transition-all ${p.avgCliente >= 80 ? 'bg-green-500' : p.avgCliente >= 40 ? 'bg-amber-500' : 'bg-red-400'}`}
+                                style={{ width: `${p.avgCliente}%` }} />
+                            </div>
+                            <span className={`text-[10px] font-bold w-7 text-right flex-shrink-0 ${p.avgCliente >= 80 ? 'text-green-600' : p.avgCliente >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
+                              {p.avgCliente}%
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 pt-0.5">{p.totalSipocs} processo{p.totalSipocs !== 1 ? 's' : ''}</p>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-slate-100 rounded-full h-1.5">
+                            <div className="bg-[#ecbf03] h-1.5 rounded-full" style={{ width: p.totalSipocs > 0 ? '100%' : '0%' }} />
+                          </div>
+                          <span className="text-xs text-slate-400 font-medium flex-shrink-0">
+                            {p.totalSipocs} processo{p.totalSipocs !== 1 ? 's' : ''}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
         </main>
       )}
 
-      {/* VIEW: BUILDER (SIPOC + RASCI) */}
+      {/* ══ BUILDER ══ */}
       {view === 'builder' && (
-        <div className="max-w-[1400px] mx-auto px-6 py-8 flex gap-6 flex-1 w-full h-full">
-          {/* BARRA LATERAL */}
-          <aside className="w-64 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-fit max-h-[80vh]">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-              <h2 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Processos</h2>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-4">
-              {Object.entries(processosPorSetor).map(([setor, procs]) => (
-                <div key={setor}>
-                  <div className="px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 rounded-md mb-2 flex items-center justify-between">
-                    <span>{setor}</span>
-                    <span className="text-slate-400 text-[10px]">{procs.length}</span>
+        <div className="max-w-screen-xl mx-auto px-6 py-6 flex gap-5 flex-1 w-full">
+
+          {/* ── Sidebar ── */}
+          <aside className="w-56 flex-shrink-0 flex flex-col gap-3">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="px-4 py-3 border-b border-slate-100 space-y-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Processos</p>
+                {/* Filtro por responsável */}
+                {Object.values(setorResponsavel).some(v => v) && (
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      onClick={() => setFiltroResponsavel('')}
+                      className={`text-[9px] font-bold px-2 py-1 rounded-full transition-all
+                        ${!filtroResponsavel ? 'bg-[#ecbf03] text-[#16253e]' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                      Todos
+                    </button>
+                    {CONSULTORES.filter(c => Object.values(setorResponsavel).includes(c)).map(c => (
+                      <button key={c}
+                        title={c}
+                        onClick={() => setFiltroResponsavel(filtroResponsavel === c ? '' : c)}
+                        className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-black
+                                    text-white transition-all ring-2 ring-offset-1
+                                    ${filtroResponsavel === c ? 'ring-[#ecbf03]' : 'ring-transparent'}
+                                    ${avatarColor(c)}`}>
+                        {getInitials(c)}
+                      </button>
+                    ))}
                   </div>
-                  <div className="space-y-1 ml-2 border-l-2 border-slate-100 pl-2">
-                    {procs.map(p => {
-                      const prog = getProcessProgress(p);
-                      const isSynced = syncStatus[p.id] === 'synced';
-                      return (
-                        <button key={p.id} onClick={() => setActiveProcessId(p.id)} className={`w-full text-left px-3 py-2 rounded-md text-sm transition-all flex justify-between items-center ${activeProcessId === p.id ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600 hover:bg-slate-50'}`}>
-                          <span className="truncate pr-2">{p.name || 'Novo Processo'}</span>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ${isSynced ? 'bg-green-100 text-green-700' : (prog >= 100 ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500')}`}>
-                            {isSynced ? '✅' : `${Math.min(prog, 100)}%`}
-                          </span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-              {mode === 'consultant' && (
-                <button 
-                  onClick={() => {
-                    const newId = `p${Date.now()}`;
-                    const novoSetor = prompt('Nome do Setor/Área:', 'Geral') || 'Geral';
-                    setProcesses([...processes, { ...defaultProcess, id: newId, name: 'Novo Processo', setor: novoSetor }]);
-                    setActiveProcessId(newId);
-                  }} 
-                  className="w-full py-2 rounded-lg border-2 border-dashed border-slate-200 text-xs font-bold text-slate-400 hover:text-blue-600 hover:border-blue-400 transition-all mt-4"
-                >
-                  + Adicionar Processo
-                </button>
-              )}
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-3 max-h-[calc(100vh-200px)]">
+                {isLoadingProcesses ? (
+                  <p className="text-xs text-slate-400 text-center py-6">Carregando…</p>
+                ) : (
+                  Object.entries(processosPorSetor)
+                  .filter(([, procs]) => {
+                    if (!filtroResponsavel) return true;
+                    const sid = procs[0]?.setor_id;
+                    return sid && setorResponsavel[sid] === filtroResponsavel;
+                  })
+                  .map(([setor, procs]) => {
+                    const setorId = procs[0]?.setor_id;
+                    const responsavel = setorId ? (setorResponsavel[setorId] || '') : '';
+                    return (
+                    <div key={setor}>
+                      <div className="px-2 mb-1.5">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{setor}</p>
+                        {setorId && (
+                          <div className="mt-1.5 relative">
+                            {/* Chip quando selecionado / botão vazio */}
+                            {responsavel ? (
+                              <button
+                                onClick={() => setSetorDropdownOpen(setorDropdownOpen === setorId ? null : setorId)}
+                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg
+                                           bg-[#ecbf03]/10 border border-[#ecbf03]/50
+                                           hover:bg-[#ecbf03]/20 transition-all">
+                                <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center
+                                                text-[10px] font-black text-white ${avatarColor(responsavel)}`}>
+                                  {getInitials(responsavel)}
+                                </div>
+                                <span className="flex-1 text-[11px] font-semibold text-[#16253e] truncate text-left">
+                                  {responsavel}
+                                </span>
+                                <svg className="w-3 h-3 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24"
+                                  stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round"
+                                    d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 012.828 2.828L11.828 15.828a2 2 0 01-1.414.586H9v-2a2 2 0 01.586-1.414z" />
+                                </svg>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setSetorDropdownOpen(setorDropdownOpen === setorId ? null : setorId)}
+                                className="w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg
+                                           border border-dashed border-slate-200 text-[11px] text-slate-400
+                                           hover:border-[#ecbf03]/60 hover:text-[#ecbf03] transition-all">
+                                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24"
+                                  stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                                </svg>
+                                Atribuir responsável
+                              </button>
+                            )}
+
+                            {/* Dropdown */}
+                            {setorDropdownOpen === setorId && (
+                              <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200
+                                              rounded-xl shadow-lg overflow-hidden z-30">
+                                {responsavel && (
+                                  <button
+                                    onClick={() => { handleResponsavelChange(setorId, ''); setSetorDropdownOpen(null); }}
+                                    className="w-full text-left px-3 py-2 text-[11px] text-red-500
+                                               hover:bg-red-50 border-b border-slate-100 transition-all">
+                                    Remover responsável
+                                  </button>
+                                )}
+                                {CONSULTORES.map(c => (
+                                  <button key={c}
+                                    onClick={() => { handleResponsavelChange(setorId, c); setSetorDropdownOpen(null); }}
+                                    className={`w-full text-left px-3 py-2 flex items-center gap-2
+                                               hover:bg-slate-50 transition-all
+                                               ${c === responsavel ? 'bg-slate-50' : ''}`}>
+                                    <div className={`w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center
+                                                    text-[9px] font-black text-white ${avatarColor(c)}`}>
+                                      {getInitials(c)}
+                                    </div>
+                                    <span className={`flex-1 text-[11px] truncate
+                                                     ${c === responsavel ? 'font-bold text-[#16253e]' : 'text-slate-600'}`}>
+                                      {c}
+                                    </span>
+                                    {c === responsavel && (
+                                      <svg className="w-3 h-3 text-[#ecbf03] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-0.5">
+                        {procs.map(p => {
+                          const pg = progresso[p.id] || { consultor: 0, cliente: 0 };
+                          const cons = Math.round(pg.consultor);
+                          const cli  = Math.round(pg.cliente);
+                          const isActive = activeProcessId === p.id;
+
+                          const CIRC_OUT = 2 * Math.PI * 13; // ≈ 81.68
+                          const CIRC_IN  = 2 * Math.PI * 7;  // ≈ 43.98
+                          const dashOut  = `${cons * CIRC_OUT / 100} ${CIRC_OUT}`;
+                          const dashIn   = `${cli  * CIRC_IN  / 100} ${CIRC_IN}`;
+                          const offsetOut = CIRC_OUT * 0.25;
+                          const offsetIn  = CIRC_IN  * 0.25;
+
+                          const colorOut = cons === 100 ? '#1D9E75' : cons > 0 ? '#7F77DD' : 'none';
+                          const colorIn  = cli  === 100 ? '#1D9E75' : cli  > 0 ? '#EF9F27' : 'none';
+
+                          const trackColor = isActive ? 'rgba(22,37,62,0.15)' : '#e2e8f0';
+
+                          let statusLabel, statusColor;
+                          if (cons === 100 && cli === 100) {
+                            statusLabel = 'Completo'; statusColor = '#1D9E75';
+                          } else if (cons === 100 && cli === 0) {
+                            statusLabel = 'Cliente não iniciou'; statusColor = null;
+                          } else if (cons === 100) {
+                            statusLabel = `Cliente: ${cli}%`; statusColor = null;
+                          } else {
+                            statusLabel = `Você: ${cons}%`; statusColor = null;
+                          }
+
+                          return (
+                            <button key={p.id} onClick={() => setActiveProcessId(p.id)}
+                              className={`w-full text-left px-2 py-2 rounded-xl transition-all flex items-center gap-2.5
+                                ${isActive ? 'bg-[#ecbf03] text-[#16253e] font-bold' : 'text-slate-600 hover:bg-slate-50'}`}>
+
+                              {/* Anel duplo SVG */}
+                              <svg width="32" height="32" viewBox="0 0 32 32" fill="none"
+                                title={`Consultor: ${cons}%\nCliente: ${cli}%`}
+                                className="flex-shrink-0">
+                                {/* Track externo */}
+                                <circle cx="16" cy="16" r="13" stroke={trackColor} strokeWidth="3" fill="none" />
+                                {/* Progresso externo (consultor) */}
+                                {cons > 0 && (
+                                  <circle cx="16" cy="16" r="13"
+                                    stroke={colorOut} strokeWidth="3" fill="none"
+                                    strokeLinecap="round"
+                                    strokeDasharray={dashOut}
+                                    strokeDashoffset={offsetOut} />
+                                )}
+                                {/* Track interno */}
+                                <circle cx="16" cy="16" r="7" stroke={trackColor} strokeWidth="3" fill="none" />
+                                {/* Progresso interno (cliente) */}
+                                {cli > 0 && (
+                                  <circle cx="16" cy="16" r="7"
+                                    stroke={colorIn} strokeWidth="3" fill="none"
+                                    strokeLinecap="round"
+                                    strokeDasharray={dashIn}
+                                    strokeDashoffset={offsetIn} />
+                                )}
+                              </svg>
+
+                              {/* Nome + status */}
+                              <div className="flex-1 min-w-0">
+                                <p className="truncate text-xs font-semibold leading-tight">{p.name || 'Novo Processo'}</p>
+                                <p className="text-[11px] leading-tight mt-0.5 truncate"
+                                  style={{ color: statusColor ?? (isActive ? 'rgba(22,37,62,0.6)' : '#94a3b8') }}>
+                                  {statusLabel}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    );
+                  })
+                )}
+                {mode === 'consultant' && (
+                  <button
+                    onClick={() => setNovoSetorModal(true)}
+                    className="w-full py-2 rounded-xl border-2 border-dashed border-slate-200 text-xs font-semibold
+                               text-slate-400 hover:text-[#ecbf03] hover:border-[#ecbf03]/50 transition-all mt-2">
+                    + Processo
+                  </button>
+                )}
+              </div>
             </div>
           </aside>
 
-          {/* ÁREA PRINCIPAL */}
-          <main className="flex-1 flex flex-col">
-            <div className="flex gap-2 mb-6">
-              <button onClick={() => setActiveTab('sipoc')} className={`px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-sm ${activeTab === 'sipoc' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}>📋 Mapeamento SIPOC</button>
-              <button onClick={() => setActiveTab('rasci')} className={`px-6 py-3 rounded-xl font-bold text-sm transition-all shadow-sm ${activeTab === 'rasci' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'}`}>👥 Matriz RASCI</button>
+          {/* ── Main ── */}
+          <main className="flex-1 flex flex-col min-w-0">
+
+            {/* Tabs */}
+            <div className="flex gap-1.5 mb-5">
+              {[
+                { id: 'sipoc',  label: 'Mapeamento SIPOC' },
+                { id: 'rasci',  label: 'Matriz RASCI' },
+                { id: 'tokens', label: 'Acesso do Cliente' },
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition-all
+                    ${activeTab === tab.id
+                      ? 'bg-white text-[#16253e] border border-[#ecbf03] shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-white/60'}`}>
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 relative flex flex-col min-h-[600px]">
-              <div className="mb-8 border-b border-slate-100 pb-6 flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">Setor:</span>
-                    {mode === 'consultant' ? (
-                      <input 
-                        type="text" 
-                        value={current.setor} 
-                        onChange={(e) => updateProcessField('setor', e.target.value)} 
-                        className="text-xs font-bold text-blue-600 uppercase tracking-wider bg-blue-50 px-2 py-1 rounded border border-blue-200 focus:outline-none focus:border-blue-400"
-                      />
-                    ) : (
-                      <span className="text-xs font-bold text-blue-600 uppercase tracking-wider">{current.setor}</span>
-                    )}
-                  </div>
-                  <input type="text" value={current.name} onChange={(e) => updateProcessField('name', e.target.value)} disabled={mode === 'client'} className="w-full text-3xl font-bold bg-transparent focus:outline-none focus:border-b-2 border-blue-500 transition-all text-slate-800 disabled:border-none py-1" />
-                </div>
-                
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-500 font-medium">
-                    {syncStatus[current.id] === 'synced' ? '✅ Salvo na planilha' : '📝 Rascunho local'}
-                  </span>
-                  <button onClick={guardarProcessoN8N} disabled={isSubmitting || syncStatus[current.id] === 'synced'} className={`px-6 py-2.5 rounded-lg font-bold text-sm transition-all flex items-center shadow-sm ${syncStatus[current.id] === 'synced' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200'}`}>
-                    {isSubmitting ? '⏳ Salvando...' : (syncStatus[current.id] === 'synced' ? '✅ Salvo' : '💾 Salvar')}
-                  </button>
-                </div>
-              </div>
+            {/* Card principal */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden">
 
-              {/* CONTEÚDO TAB: SIPOC */}
-              {activeTab === 'sipoc' && (
-                mode === 'consultant' ? (
-                  <div className="grid grid-cols-5 gap-4">
-                    <SIPOCColumn title="Suppliers" items={current.suppliers} field="suppliers" />
-                    <SIPOCColumn title="Inputs" items={current.inputs} field="inputs" isInput={true} />
-                    <div className="flex flex-col h-full shadow-sm rounded-xl bg-white border border-slate-200 overflow-hidden">
-                      <div className="text-center py-2 bg-blue-700 text-white font-bold text-xs uppercase tracking-wider">Process</div>
-                      <div className="flex-1 p-4 flex items-center justify-center bg-blue-50/50 min-h-[250px] text-center"><div className="font-bold text-blue-900">{current.name}</div></div>
+              {/* Process header */}
+              {activeTab !== 'tokens' && (
+                <div className="px-8 pt-7 pb-5 border-b border-slate-100">
+                  <div className="flex items-start justify-between gap-6">
+                    <div className="flex-1 min-w-0">
+                      <input
+                        type="text" value={current.name}
+                        onChange={e => upd('name', e.target.value)}
+                        disabled={mode === 'client'}
+                        placeholder="Nome do processo"
+                        className="w-full text-2xl font-black text-slate-900 bg-transparent outline-none
+                                   border-b-2 border-transparent focus:border-[#ecbf03] transition-all
+                                   disabled:border-transparent py-0.5 placeholder:text-slate-300" />
                     </div>
-                    <SIPOCColumn title="Outputs" items={current.outputs} field="outputs" />
-                    <SIPOCColumn title="Customers" items={current.customers} field="customers" />
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-8 flex-1">
-                    <div className="space-y-6">
-                      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
-                        <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide border-b border-slate-200 pb-2">Informações Gerais</h3>
-                        <SelectField label="Periodicidade" value={current.periodicidade} field="periodicidade" options={['Diário', 'Semanal', 'Quinzenal', 'Mensal', 'Semestral', 'Anual']} />
-                        <SelectField label="Tipo do Processo" value={current.tipo} field="tipo" options={['Principal', 'Apoio', 'Gestão']} />
-                        <TagsInput tags={current.ferramentas} onChange={(newTags) => updateProcessField('ferramentas', newTags)} placeholder="Ex: SAP, Trello..." label="Ferramentas (Sistemas, ERPs)" />
-                      </div>
-                      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
-                        <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide border-b border-slate-200 pb-2">Padronização</h3>
-                        <SelectField label="Inputs padronizados?" value={current.inputsPadronizados} field="inputsPadronizados" options={['Sim', 'Não']} />
-                        <SelectField label="Outputs padronizados?" value={current.outputsPadronizados} field="outputsPadronizados" options={['Sim', 'Não']} />
-                        <SelectField label="Gerido através de dados?" value={current.geridoDados} field="geridoDados" options={['Sim', 'Não']} />
-                      </div>
-                    </div>
-                    <div className="space-y-6">
-                      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
-                        <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide border-b border-slate-200 pb-2">Maturidade & Impacto</h3>
-                        <SelectField label="Classificação Tecnologia" value={current.tecnologia} field="tecnologia" options={['Manual', 'Semimanual', 'Automatizado']} />
-                        <SelectField label="Maturidade do processo" value={current.maturidade} field="maturidade" options={['Baixo', 'Médio', 'Alto']} />
-                        <SelectField label="Volume e esforço" value={current.esforco} field="esforco" options={['Baixo', 'Médio', 'Alto']} />
-                        <SelectField label="Impacto no negócio" value={current.impacto} field="impacto" options={['Baixo', 'Médio', 'Alto']} />
-                      </div>
-                      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
-                        <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide border-b border-slate-200 pb-2">Observações (Gargalos e Dores)</h3>
-                        <textarea value={current.observacoes} onChange={(e) => updateProcessField('observacoes', e.target.value)} placeholder="Adicione notas, gargalos ou detalhes adicionais..." className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-300 text-sm focus:border-blue-500 outline-none bg-white resize-none h-24" />
-                      </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      {isSaving && (
+                        <span className="text-xs font-medium text-[#ecbf03]">↻ Salvando…</span>
+                      )}
+                      <button onClick={guardar} disabled={isSubmitting || isSaving}
+                        className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-5 py-2 rounded-xl
+                                   font-semibold text-sm transition-all disabled:opacity-50
+                                   shadow-sm shadow-[#ecbf03]/30">
+                        {isSubmitting || isSaving ? 'Salvando…' : 'Salvar'}
+                      </button>
                     </div>
                   </div>
-                )
+                </div>
               )}
 
-              {/* CONTEÚDO TAB: RASCI */}
-              {activeTab === 'rasci' && (
-                <div className="flex-1">
-                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-5 mb-8">
-                    <h3 className="font-bold text-blue-800 mb-2">Como preencher a Matriz RASCI?</h3>
-                    <p className="text-sm text-blue-600 mb-4">Adicione os Cargos ou Áreas responsáveis por cada papel. Pressione Enter após escrever cada cargo.</p>
-                    <div className="grid grid-cols-5 gap-4 text-xs">
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100"><strong className="text-slate-800 text-base">R</strong><br/>esponsável (Executa)</div>
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100"><strong className="text-slate-800 text-base">A</strong><br/>provador (Autoridade)</div>
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100"><strong className="text-slate-800 text-base">S</strong><br/>uporte (Apoia)</div>
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100"><strong className="text-slate-800 text-base">C</strong><br/>onsultado (Opina)</div>
-                      <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100"><strong className="text-slate-800 text-base">I</strong><br/>nformado (Avisado)</div>
-                    </div>
-                  </div>
+              {/* ── TAB: SIPOC ── */}
+              {activeTab === 'sipoc' && (
+                <div className="p-8 flex-1 flex flex-col">
+
+                  {/* ── Modo Consultor: metadata + colunas ── */}
                   {mode === 'consultant' && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 text-sm text-amber-700 font-medium">
-                      A Matriz RASCI é preenchida pelo cliente. Alterne para o modo Cliente para editar.
+                    <>
+                      {/* Metadata bar: Área Executora, Tipo, Impacto */}
+                      <div className="grid grid-cols-3 gap-4 mb-6 p-5 bg-slate-50 rounded-2xl border border-slate-200">
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Área Executora</p>
+                          <input type="text" value={current.setor}
+                            onChange={e => upd('setor', e.target.value)}
+                            placeholder="Ex: Financeiro"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium
+                                       text-slate-700 outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Tipo do Processo</p>
+                          <select value={current.tipo} onChange={e => upd('tipo', e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700
+                                       outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all">
+                            <option value="">— selecione —</option>
+                            {['Principal','Apoio','Gestão'].map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Impacto no Negócio</p>
+                          <select value={current.impacto} onChange={e => upd('impacto', e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-700
+                                       outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all">
+                            <option value="">— selecione —</option>
+                            {['Baixo','Médio','Alto'].map(o => <option key={o}>{o}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* SIPOC grid */}
+                      <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr 1.2fr 1fr 1fr' }}>
+                        {SIPOC_COLS.slice(0,2).map(col => (
+                          <SIPOCColumn key={col.key} col={col} items={current[col.key]}
+                            globalOutputs={globalOutputs}
+                            onUpdate={(field, newArr) => upd(field, newArr)} />
+                        ))}
+
+                        {/* Process (center) */}
+                        <div className="flex flex-col rounded-xl overflow-hidden border-2 border-[#ecbf03]/40 shadow-sm">
+                          <div className="bg-[#16253e] px-3 py-2.5 text-center">
+                            <span className="text-white font-bold text-xs uppercase tracking-widest">Process</span>
+                          </div>
+                          <div className="flex-1 flex flex-col items-center justify-center bg-[#16253e]/5 min-h-[220px] p-4 gap-3">
+                            <p className="font-bold text-[#16253e] text-center text-sm">{current.name || 'Novo Processo'}</p>
+                            {current.tipo && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${TIPO_COLORS[current.tipo] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                                {current.tipo}
+                              </span>
+                            )}
+                            {current.impacto && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${IMPACTO_COLORS[current.impacto] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                                Impacto {current.impacto}
+                              </span>
+                            )}
+                            {current.setor && current.setor !== 'Geral' && (
+                              <span className="text-[10px] text-slate-500 font-medium">{current.setor}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {SIPOC_COLS.slice(2).map(col => (
+                          <SIPOCColumn key={col.key} col={col} items={current[col.key]}
+                            globalOutputs={globalOutputs}
+                            onUpdate={(field, newArr) => upd(field, newArr)} />
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── Modo Cliente: formulário por item ── */}
+                  {mode === 'client' && (() => {
+                    const rc = getRC();
+                    const inputNames  = (current.inputs  || []).filter(s => s.trim());
+                    const outputNames = (current.outputs || []).filter(s => s.trim());
+                    return (
+                      <div className="space-y-5">
+
+                        {/* Card 1 — Entradas */}
+                        <div className="rounded-2xl border border-slate-200 p-5 space-y-3">
+                          <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+                            <span className="text-base">📥</span>
+                            <div>
+                              <p className="font-bold text-slate-800 text-sm leading-tight">Entradas do processo</p>
+                              <p className="text-xs text-slate-400">Como cada input chega até a equipe</p>
+                            </div>
+                          </div>
+                          {inputNames.length === 0
+                            ? <p className="text-sm text-slate-400 text-center py-3 border-2 border-dashed border-slate-200 rounded-xl">Nenhuma entrada cadastrada pelo consultor ainda.</p>
+                            : inputNames.map(name => (
+                              <ExpandableCard key={name}
+                                isExpanded={!!clienteExpInputs[name]}
+                                onToggle={() => togCI(name)}
+                                badge={<span className="text-[10px] font-bold bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full border border-sky-200 flex-shrink-0">Input</span>}
+                                title={name}>
+                                <div><CFL>Padronizado?</CFL><PillSelect value={rc.inputs[name]?.padronizado||''} onChange={v=>updCI(name,'padronizado',v)} /></div>
+                                <div><CFL>Ferramentas que geram este input</CFL><TagsInput tags={rc.inputs[name]?.ferramentas||[]} onChange={v=>updCI(name,'ferramentas',v)} placeholder="Ex: SAP, Excel… (Enter para adicionar)" /></div>
+                                <div><CFL>Quem envia</CFL><MultiChipSelect options={current.suppliers} value={rc.inputs[name]?.quem_envia||[]} onChange={v=>updCI(name,'quem_envia',v)} /></div>
+                                <div><CFL>Observações</CFL><textarea rows={3} value={rc.inputs[name]?.observacoes||''} onChange={e=>updCI(name,'observacoes',e.target.value)} placeholder="Algo relevante sobre esta entrada..." className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all resize-none placeholder:text-slate-400" /></div>
+                              </ExpandableCard>
+                            ))
+                          }
+                        </div>
+
+                        {/* Card 2 — Saídas */}
+                        <div className="rounded-2xl border border-slate-200 p-5 space-y-3">
+                          <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+                            <span className="text-base">📤</span>
+                            <div>
+                              <p className="font-bold text-slate-800 text-sm leading-tight">Saídas do processo</p>
+                              <p className="text-xs text-slate-400">O que este processo entrega e para quem</p>
+                            </div>
+                          </div>
+                          {outputNames.length === 0
+                            ? <p className="text-sm text-slate-400 text-center py-3 border-2 border-dashed border-slate-200 rounded-xl">Nenhuma saída cadastrada pelo consultor ainda.</p>
+                            : outputNames.map(name => (
+                              <ExpandableCard key={name}
+                                isExpanded={!!clienteExpOutputs[name]}
+                                onToggle={() => togCO(name)}
+                                badge={<span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200 flex-shrink-0">Output</span>}
+                                title={name}>
+                                <div><CFL>Padronizado?</CFL><PillSelect value={rc.outputs[name]?.padronizado||''} onChange={v=>updCO(name,'padronizado',v)} /></div>
+                                <div><CFL>Ferramentas que consomem este output</CFL><TagsInput tags={rc.outputs[name]?.ferramentas||[]} onChange={v=>updCO(name,'ferramentas',v)} placeholder="Ex: Tableau, Power BI… (Enter para adicionar)" /></div>
+                                <div><CFL>Quem recebe</CFL><MultiChipSelect options={current.customers} value={rc.outputs[name]?.quem_recebe||[]} onChange={v=>updCO(name,'quem_recebe',v)} /></div>
+                                <div><CFL>Observações</CFL><textarea rows={3} value={rc.outputs[name]?.observacoes||''} onChange={e=>updCO(name,'observacoes',e.target.value)} placeholder="Algo relevante sobre esta saída..." className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all resize-none placeholder:text-slate-400" /></div>
+                              </ExpandableCard>
+                            ))
+                          }
+                        </div>
+
+                        {/* Card 3 — Informações gerais */}
+                        <div className="rounded-2xl border border-slate-200 p-5 space-y-4">
+                          <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+                            <span className="text-base">⚙️</span>
+                            <div>
+                              <p className="font-bold text-slate-800 text-sm leading-tight">Informações gerais</p>
+                              <p className="text-xs text-slate-400">Frequência e volume do processo</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <CFL>Periodicidade</CFL>
+                              <select value={rc.processo.periodicidade} onChange={e=>updCP('periodicidade',e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all">
+                                <option value="">— selecione —</option>
+                                {['Diária','Semanal','Quinzenal','Mensal','Trimestral','Semestral','Anual','Sob demanda'].map(o=><option key={o} value={o.toLowerCase()}>{o}</option>)}
+                              </select>
+                            </div>
+                            <div>
+                              <CFL>Volume e esforço</CFL>
+                              <select value={rc.processo.volume_esforco} onChange={e=>updCP('volume_esforco',e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all">
+                                <option value="">— selecione —</option>
+                                {[['1','1 — Muito baixo'],['2','2 — Baixo'],['3','3 — Médio'],['4','4 — Alto'],['5','5 — Muito alto']].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <CFL>Observações gerais</CFL>
+                            <textarea rows={5} value={rc.processo.observacoes_gerais} onChange={e=>updCP('observacoes_gerais',e.target.value)}
+                              placeholder="Gargalos, dores, pontos de atenção..."
+                              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all resize-none placeholder:text-slate-400" />
+                          </div>
+                        </div>
+
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* ── TAB: RASCI ── */}
+              {activeTab === 'rasci' && (
+                <div className="p-8 flex-1 flex flex-col">
+                  {mode === 'client' && (
+                    <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-5 text-sm text-slate-500">
+                      <span>ℹ</span>
+                      <span className="font-medium">A Matriz RASCI é preenchida pelo consultor.</span>
                     </div>
                   )}
-                  <div className="space-y-5 max-w-3xl">
-                    <TagsInput label="R - Responsável (Executa)" tags={current.rasci.r} onChange={(tags) => updateRasciField('r', tags)} placeholder="Ex: Analista Financeiro" colorClass="focus-within:border-blue-500" disabled={mode === 'consultant'} />
-                    <TagsInput label="A - Aprovador (Presta Contas)" tags={current.rasci.a} onChange={(tags) => updateRasciField('a', tags)} placeholder="Ex: Diretor Financeiro" colorClass="focus-within:border-purple-500" disabled={mode === 'consultant'} />
-                    <TagsInput label="S - Suporte (Apoia na execução)" tags={current.rasci.s} onChange={(tags) => updateRasciField('s', tags)} placeholder="Ex: TI" colorClass="focus-within:border-green-500" disabled={mode === 'consultant'} />
-                    <TagsInput label="C - Consultado (Dá opinião antes)" tags={current.rasci.c} onChange={(tags) => updateRasciField('c', tags)} placeholder="Ex: Jurídico" colorClass="focus-within:border-amber-500" disabled={mode === 'consultant'} />
-                    <TagsInput label="I - Informado (Avisado depois)" tags={current.rasci.i} onChange={(tags) => updateRasciField('i', tags)} placeholder="Ex: Equipa Comercial" colorClass="focus-within:border-slate-500" disabled={mode === 'consultant'} />
+                  <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+                    {[
+                      { key: 'r', label: 'R', title: 'Responsável', sub: 'Executa',        color: 'bg-[#16253e]' },
+                      { key: 'a', label: 'A', title: 'Aprovador',   sub: 'Autoridade',     color: 'bg-violet-600' },
+                      { key: 's', label: 'S', title: 'Suporte',     sub: 'Apoia',          color: 'bg-emerald-600' },
+                      { key: 'c', label: 'C', title: 'Consultado',  sub: 'Opina antes',    color: 'bg-amber-500' },
+                      { key: 'i', label: 'I', title: 'Informado',   sub: 'Avisado depois', color: 'bg-slate-500' },
+                    ].map(r => (
+                      <div key={r.key} className="flex flex-col rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                        <div className={`${r.color} px-3 py-3 text-center`}>
+                          <div className="text-white font-black text-lg leading-none">{r.label}</div>
+                          <div className="text-white/90 text-[11px] font-bold mt-0.5">{r.title}</div>
+                          <div className="text-white/60 text-[10px] mt-0.5">{r.sub}</div>
+                        </div>
+                        <div className="flex-1 p-3 space-y-1.5 bg-white min-h-[220px]">
+                          {(current.rasci[r.key] || []).map((person, idx) => (
+                            <div key={idx} className="group flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50
+                                                       rounded-lg border border-slate-200 hover:border-slate-300 transition-all">
+                              <span className="flex-1 text-xs text-slate-700 font-medium truncate">{person}</span>
+                              {mode === 'consultant' && (
+                                <button onClick={() => updRasci(r.key, current.rasci[r.key].filter((_, i) => i !== idx))}
+                                  className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-red-500
+                                             transition-all text-sm leading-none flex-shrink-0">×</button>
+                              )}
+                            </div>
+                          ))}
+                          {mode === 'consultant' && (
+                            <RasciInlineInput onAdd={val => {
+                              const cur = current.rasci[r.key] || [];
+                              if (!cur.includes(val)) updRasci(r.key, [...cur, val]);
+                            }} />
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
+
+              {/* ── TAB: TOKENS ── */}
+              {activeTab === 'tokens' && (
+                <div className="p-8 flex-1">
+                  <TokenPanel setorId={current.setor_id} setorNome={current.setor} />
+                </div>
+              )}
+
             </div>
+
+            {/* ── Rodapé: excluir processo ── */}
+            {mode === 'consultant' && (
+              <div className="px-8 py-3 border-t border-slate-100 flex justify-end">
+                <button onClick={excluirProcesso}
+                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-500
+                             hover:bg-red-50 px-3 py-1.5 rounded-lg transition-all font-medium">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  Excluir processo
+                </button>
+              </div>
+            )}
+
           </main>
+        </div>
+      )}
+
+      {/* ── Modal: Novo Setor ── */}
+      {novoSetorModal && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) { setNovoSetorModal(false); setNovoSetorNome(''); setNovoSetorResp(''); } }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+            <h3 className="font-bold text-slate-800 text-lg">Novo setor</h3>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                Nome do setor / área
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={novoSetorNome}
+                onChange={e => setNovoSetorNome(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleCriarSetor()}
+                placeholder="Ex: Financeiro, RH, Comercial…"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none
+                           focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all
+                           placeholder:text-slate-400" />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Consultor responsável
+              </label>
+              <div className="space-y-1">
+                {CONSULTORES.map(c => (
+                  <button key={c} type="button"
+                    onClick={() => setNovoSetorResp(novoSetorResp === c ? '' : c)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl border transition-all
+                      ${novoSetorResp === c
+                        ? 'bg-[#ecbf03]/10 border-[#ecbf03]/60'
+                        : 'border-slate-200 hover:bg-slate-50 hover:border-slate-300'}`}>
+                    <div className={`w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center
+                                    text-[10px] font-black text-white ${avatarColor(c)}`}>
+                      {getInitials(c)}
+                    </div>
+                    <span className={`flex-1 text-sm text-left ${novoSetorResp === c ? 'font-bold text-[#16253e]' : 'text-slate-600'}`}>
+                      {c}
+                    </span>
+                    {novoSetorResp === c && (
+                      <svg className="w-4 h-4 text-[#ecbf03] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => { setNovoSetorModal(false); setNovoSetorNome(''); setNovoSetorResp(''); }}
+                className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold
+                           text-slate-500 hover:bg-slate-50 transition-all">
+                Cancelar
+              </button>
+              <button
+                onClick={handleCriarSetor}
+                className="flex-1 py-2.5 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e]
+                           font-bold text-sm transition-all shadow-sm shadow-[#ecbf03]/30">
+                Criar setor
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

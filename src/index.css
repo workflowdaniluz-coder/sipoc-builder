@@ -1,1 +1,12 @@
 @import "tailwindcss";
+
+/* P-Excellence Brand */
+:root {
+  --brand-navy:  #16253e;
+  --brand-gold:  #ecbf03;
+  --brand-gray:  #b3b3b3;
+}
+
+body {
+  font-family: 'Open Sans', system-ui, sans-serif;
+}
