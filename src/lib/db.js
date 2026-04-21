@@ -28,14 +28,12 @@ export async function listarProjetos() {
   const { data, error } = await supabase
     .from('clientes')
     .select(`
-      id,
-      nome,
-      cnpj,
-      criado_em,
+      id, nome, cnpj, criado_em,
+      data_contratacao, data_fim_projeto, quantidade_mapeamentos, status_projeto,
       setores (
         id,
         sipocs (
-          id,
+          id, status,
           nome_processo,
           suppliers, inputs, outputs, customers,
           tipo, impacto, maturidade, esforco,
@@ -79,25 +77,102 @@ export async function listarProjetos() {
     const avgCliente   = pgs.length ? Math.round(pgs.reduce((a, pg) => a + pg.cliente,   0) / pgs.length) : 0
 
     return {
-      id:           c.id,
-      empresa:      c.nome,
-      cnpj:         c.cnpj,
-      dataCriacao:  new Date(c.criado_em).toLocaleDateString('pt-BR'),
-      totalSipocs:  allSipocs.length,
+      id:                    c.id,
+      empresa:               c.nome,
+      cnpj:                  c.cnpj,
+      dataCriacao:           new Date(c.criado_em).toLocaleDateString('pt-BR'),
+      totalSipocs:           allSipocs.length,
       avgConsultor,
       avgCliente,
+      statusProjeto:         c.status_projeto ?? 'em_andamento',
+      dataFimProjeto:        c.data_fim_projeto ?? null,
+      quantidadeMapeamentos: c.quantidade_mapeamentos ?? null,
+      mapeamentosRealizados: allSipocs.filter(s => s.status === 'em_revisao').length,
     }
   })
 }
 
-export async function criarProjeto(nome, cnpj = null) {
+export async function buscarDetalhesCliente(clienteId) {
+  const { data: c, error } = await supabase
+    .from('clientes')
+    .select(`
+      id, nome, cnpj, criado_em,
+      data_contratacao, data_fim_projeto, quantidade_mapeamentos, status_projeto,
+      escopo_tipo, areas_especificas, expectativa_cliente, maiores_dores,
+      setores (
+        id, nome, responsavel,
+        sipocs ( id, status ),
+        tokens_acesso ( usado_em )
+      )
+    `)
+    .eq('id', clienteId)
+    .single()
+
+  if (error) throw new Error('Erro ao buscar detalhes do projeto: ' + error.message)
+
+  const setores   = c.setores ?? []
+  const allSipocs = setores.flatMap(s => s.sipocs ?? [])
+  const allTokens = setores.flatMap(s => s.tokens_acesso ?? [])
+  const ultimoAcesso = allTokens
+    .map(t => t.usado_em).filter(Boolean).sort().at(-1) ?? null
+
+  return {
+    id:                    c.id,
+    nome:                  c.nome,
+    cnpj:                  c.cnpj,
+    criadoEm:              c.criado_em,
+    dataContratacao:       c.data_contratacao,
+    dataFimProjeto:        c.data_fim_projeto,
+    quantidadeMapeamentos: c.quantidade_mapeamentos,
+    statusProjeto:         c.status_projeto ?? 'em_andamento',
+    escopoTipo:            c.escopo_tipo,
+    areasEspecificas:      c.areas_especificas ?? [],
+    expectativaCliente:    c.expectativa_cliente,
+    maioresDores:          c.maiores_dores,
+    totalSetores:          setores.length,
+    totalSipocs:           allSipocs.length,
+    mapeamentosRealizados: allSipocs.filter(s => s.status === 'em_revisao').length,
+    ultimoAcessoCliente:   ultimoAcesso,
+  }
+}
+
+export async function atualizarCliente(clienteId, dados) {
+  const payload = {}
+  if (dados.nome               !== undefined) payload.nome                  = dados.nome
+  if (dados.cnpj               !== undefined) payload.cnpj                  = dados.cnpj || null
+  if (dados.dataContratacao    !== undefined) payload.data_contratacao      = dados.dataContratacao || null
+  if (dados.dataFimProjeto     !== undefined) payload.data_fim_projeto      = dados.dataFimProjeto || null
+  if (dados.quantidadeMapeamentos !== undefined) payload.quantidade_mapeamentos = dados.quantidadeMapeamentos ? Number(dados.quantidadeMapeamentos) : null
+  if (dados.escopoTipo         !== undefined) payload.escopo_tipo           = dados.escopoTipo || null
+  if (dados.areasEspecificas   !== undefined) payload.areas_especificas     = dados.areasEspecificas ?? []
+  if (dados.expectativaCliente !== undefined) payload.expectativa_cliente   = dados.expectativaCliente || null
+  if (dados.maioresDores       !== undefined) payload.maiores_dores         = dados.maioresDores || null
+  if (dados.statusProjeto      !== undefined) payload.status_projeto        = dados.statusProjeto
+
+  const { error } = await supabase.from('clientes').update(payload).eq('id', clienteId)
+  if (error) throw new Error('Erro ao atualizar projeto: ' + error.message)
+}
+
+export async function criarProjeto(dados) {
   const { data: { user }, error: authError } = await supabase.auth.getUser()
   if (authError || !user) throw new Error('Usuário não autenticado.')
 
   const { data: cliente, error: clienteError } = await supabase
     .from('clientes')
-    .insert({ nome, cnpj, criado_por: user.id })
-    .select('id, nome, criado_em')
+    .insert({
+      nome:                    dados.nome,
+      cnpj:                    dados.cnpj || null,
+      criado_por:              user.id,
+      data_contratacao:        dados.dataContratacao || null,
+      data_fim_projeto:        dados.dataFimProjeto || null,
+      quantidade_mapeamentos:  dados.quantidadeMapeamentos ? Number(dados.quantidadeMapeamentos) : null,
+      escopo_tipo:             dados.escopoTipo || null,
+      areas_especificas:       dados.areasEspecificas ?? [],
+      expectativa_cliente:     dados.expectativaCliente || null,
+      maiores_dores:           dados.maioresDores || null,
+      status_projeto:          'em_andamento',
+    })
+    .select('id, nome, cnpj, criado_em, data_fim_projeto, quantidade_mapeamentos')
     .single()
 
   if (clienteError) throw new Error('Erro ao criar projeto: ' + clienteError.message)
@@ -110,10 +185,17 @@ export async function criarProjeto(nome, cnpj = null) {
   if (setorError) throw new Error('Erro ao criar setor inicial: ' + setorError.message)
 
   return {
-    id: cliente.id,
-    empresa: cliente.nome,
-    dataCriacao: new Date(cliente.criado_em).toLocaleDateString('pt-BR'),
-    totalSipocs: 0,
+    id:                    cliente.id,
+    empresa:               cliente.nome,
+    cnpj:                  cliente.cnpj,
+    dataCriacao:           new Date(cliente.criado_em).toLocaleDateString('pt-BR'),
+    totalSipocs:           0,
+    avgConsultor:          0,
+    avgCliente:            0,
+    statusProjeto:         'em_andamento',
+    dataFimProjeto:        cliente.data_fim_projeto ?? null,
+    quantidadeMapeamentos: cliente.quantidade_mapeamentos ?? null,
+    mapeamentosRealizados: 0,
   }
 }
 
@@ -242,6 +324,11 @@ export async function listarProcessos(clienteId) {
       },
       respostas_cliente: sipoc.respostas_cliente ?? {},
       status: sipoc.status ?? 'rascunho',
+      bpmn_status:              sipoc.bpmn_status ?? null,
+      bpmn_drive_url:           sipoc.bpmn_drive_url ?? null,
+      bpmn_validado_por:        sipoc.bpmn_validado_por ?? null,
+      bpmn_validacao_comentario:sipoc.bpmn_validacao_comentario ?? null,
+      bpmn_validado_em:         sipoc.bpmn_validado_em ?? null,
     }
   })
 }
@@ -488,6 +575,401 @@ export async function salvarRespostaCliente(tokenId, sipocId, respostas) {
       .eq('id', tokenId)
   }
 }
+
+// ──────────────────────────────────────────────
+// NOTIFICAÇÕES
+// ──────────────────────────────────────────────
+
+/**
+ * Lista notificações unread e read (não dismissed) de um projeto,
+ * ordenadas por created_at desc. Requer consultor autenticado (RLS).
+ */
+export async function listarNotificacoes(projectId) {
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('id, type, title, body, status, created_at')
+    .eq('project_id', projectId)
+    .in('status', ['unread', 'read'])
+    .order('created_at', { ascending: false })
+
+  if (error) throw new Error('Erro ao listar notificações: ' + error.message)
+  return data ?? []
+}
+
+/**
+ * Atualiza o status de uma notificação para 'read' ou 'dismissed'.
+ * Requer consultor autenticado (RLS).
+ */
+export async function atualizarStatusNotificacao(notificationId, status) {
+  if (!['read', 'dismissed'].includes(status)) {
+    throw new Error('Status inválido. Use "read" ou "dismissed".')
+  }
+
+  const { error } = await supabase
+    .from('notifications')
+    .update({ status })
+    .eq('id', notificationId)
+
+  if (error) throw new Error('Erro ao atualizar notificação: ' + error.message)
+}
+
+/**
+ * Conta notificações unread de múltiplos projetos de uma vez.
+ * Retorna { [project_id]: count }.
+ */
+export async function contarNotificacoesUnread(projectIds) {
+  if (!projectIds.length) return {}
+
+  const { data, error } = await supabase
+    .from('notifications')
+    .select('project_id')
+    .in('project_id', projectIds)
+    .eq('status', 'unread')
+
+  if (error) throw new Error('Erro ao contar notificações: ' + error.message)
+
+  const counts = {}
+  for (const row of data ?? []) {
+    counts[row.project_id] = (counts[row.project_id] ?? 0) + 1
+  }
+  return counts
+}
+
+// ──────────────────────────────────────────────
+// TOKENS DE VALIDAÇÃO BPMN
+// ──────────────────────────────────────────────
+
+export async function gerarTokenValidacao(sipocId) {
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) throw new Error('Não autenticado.')
+
+  const { data, error } = await supabase
+    .from('tokens_validacao_bpmn')
+    .insert({ sipoc_id: sipocId, criado_por: user.id })
+    .select('id, token, expira_em, criado_em')
+    .single()
+
+  if (error) throw new Error('Erro ao gerar token de validação: ' + error.message)
+  return { ...data, url: `${window.location.origin}?vt=${data.token}` }
+}
+
+export async function getTokenValidacaoBySipoc(sipocId) {
+  const { data, error } = await supabase
+    .from('tokens_validacao_bpmn')
+    .select('id, token, expira_em, criado_em')
+    .eq('sipoc_id', sipocId)
+    .is('revogado_em', null)
+    .gt('expira_em', new Date().toISOString())
+    .order('criado_em', { ascending: false })
+    .maybeSingle()
+
+  if (error) throw new Error('Erro ao buscar token de validação: ' + error.message)
+  return data ? { ...data, url: `${window.location.origin}?vt=${data.token}` } : null
+}
+
+export async function revogarTokenValidacao(tokenId) {
+  const { error } = await supabase
+    .from('tokens_validacao_bpmn')
+    .update({ revogado_em: new Date().toISOString() })
+    .eq('id', tokenId)
+
+  if (error) throw new Error('Erro ao revogar token de validação: ' + error.message)
+}
+
+// ──────────────────────────────────────────────
+// BPMN LIFECYCLE
+// ──────────────────────────────────────────────
+
+/**
+ * Retorna todos os sipocs de um projeto com os campos de lifecycle BPMN.
+ */
+export async function getSipocsByCliente(clienteId) {
+  const setores = await listarSetores(clienteId)
+  if (!setores.length) return []
+  const setorIds = setores.map(s => s.id)
+
+  const { data: sipocs, error } = await supabase
+    .from('sipocs')
+    .select(`
+      id, nome_processo, setor_id,
+      bpmn_fase_atual, bpmn_data_prevista, bpmn_responsavel,
+      bpmn_drive_url, bpmn_status,
+      bpmn_validado_por, bpmn_validacao_comentario, bpmn_validado_em,
+      bpmn_revisao_parecer, bpmn_revisao_em, bpmn_aprovado_em
+    `)
+    .in('setor_id', setorIds)
+    .order('criado_em')
+
+  if (error) throw new Error('Erro ao carregar processos BPMN: ' + error.message)
+
+  return sipocs.map(s => {
+    const setor = setores.find(st => st.id === s.setor_id)
+    return {
+      ...s,
+      bpmn_fase_atual: s.bpmn_fase_atual ?? 'mapeamento_as_is',
+      setor_nome: setor?.nome ?? 'Geral',
+      setor_responsavel: setor?.responsavel ?? '',
+    }
+  })
+}
+
+/**
+ * Busca todas as linhas de bpmn_fase_historico para uma lista de sipocIds.
+ * Retorna um mapa { [sipocId]: faseRow[] } com linhas ordenadas mais recentes primeiro.
+ */
+export async function getAllFasesHistorico(sipocIds) {
+  if (!sipocIds.length) return {}
+
+  const { data, error } = await supabase
+    .from('bpmn_fase_historico')
+    .select('*')
+    .in('sipoc_id', sipocIds)
+    .order('criado_em', { ascending: false })
+
+  if (error) throw new Error('Erro ao carregar histórico de fases: ' + error.message)
+
+  const map = {}
+  for (const id of sipocIds) map[id] = []
+  for (const row of data ?? []) {
+    if (map[row.sipoc_id]) map[row.sipoc_id].push(row)
+  }
+  return map
+}
+
+/**
+ * Inicia o timer de uma fase.
+ * Se existir uma linha 'planejado' para essa fase, atualiza para 'em_andamento'.
+ * Caso contrário, cria uma nova linha.
+ * Também atualiza bpmn_fase_atual no sipoc.
+ */
+export async function iniciarFase(sipocId, fase, consultorId) {
+  const now = new Date().toISOString()
+
+  const { data: existing } = await supabase
+    .from('bpmn_fase_historico')
+    .select('id, eventos, duracao_segundos')
+    .eq('sipoc_id', sipocId)
+    .eq('fase', fase)
+    .eq('status', 'planejado')
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  let faseRow
+  if (existing) {
+    const { data, error } = await supabase
+      .from('bpmn_fase_historico')
+      .update({
+        status: 'em_andamento',
+        iniciado_em: now,
+        eventos: [...(existing.eventos ?? []), { tipo: 'start', em: now }],
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .single()
+    if (error) throw new Error('Erro ao iniciar fase: ' + error.message)
+    faseRow = data
+  } else {
+    const { data, error } = await supabase
+      .from('bpmn_fase_historico')
+      .insert({
+        sipoc_id:        sipocId,
+        consultor_id:    consultorId,
+        fase,
+        ciclo:           1,
+        status:          'em_andamento',
+        iniciado_em:     now,
+        duracao_segundos: 0,
+        eventos:         [{ tipo: 'start', em: now }],
+      })
+      .select('*')
+      .single()
+    if (error) throw new Error('Erro ao iniciar fase: ' + error.message)
+    faseRow = data
+  }
+
+  await supabase.from('sipocs').update({ bpmn_fase_atual: fase }).eq('id', sipocId)
+  return faseRow
+}
+
+/**
+ * Pausa o timer de uma fase em andamento.
+ * Acumula a duração percorrida desde o último start/resume.
+ */
+export async function pausarFase(faseId) {
+  const now = new Date().toISOString()
+
+  const { data: fase, error: fetchErr } = await supabase
+    .from('bpmn_fase_historico')
+    .select('eventos, duracao_segundos')
+    .eq('id', faseId)
+    .single()
+  if (fetchErr) throw new Error('Erro ao buscar fase: ' + fetchErr.message)
+
+  const eventos = fase.eventos ?? []
+  const last = eventos[eventos.length - 1]
+  let delta = 0
+  if (last && (last.tipo === 'start' || last.tipo === 'resume')) {
+    delta = Math.round((new Date(now) - new Date(last.em)) / 1000)
+  }
+
+  const { data, error } = await supabase
+    .from('bpmn_fase_historico')
+    .update({
+      status:           'pausado',
+      duracao_segundos: (fase.duracao_segundos ?? 0) + delta,
+      eventos:          [...eventos, { tipo: 'pause', em: now }],
+    })
+    .eq('id', faseId)
+    .select('*')
+    .single()
+  if (error) throw new Error('Erro ao pausar fase: ' + error.message)
+  return data
+}
+
+/**
+ * Retoma o timer de uma fase pausada.
+ */
+export async function retomarFase(faseId) {
+  const now = new Date().toISOString()
+
+  const { data: fase, error: fetchErr } = await supabase
+    .from('bpmn_fase_historico')
+    .select('eventos')
+    .eq('id', faseId)
+    .single()
+  if (fetchErr) throw new Error('Erro ao buscar fase: ' + fetchErr.message)
+
+  const { data, error } = await supabase
+    .from('bpmn_fase_historico')
+    .update({
+      status:  'em_andamento',
+      eventos: [...(fase.eventos ?? []), { tipo: 'resume', em: now }],
+    })
+    .eq('id', faseId)
+    .select('*')
+    .single()
+  if (error) throw new Error('Erro ao retomar fase: ' + error.message)
+  return data
+}
+
+/**
+ * Encerra o timer de uma fase (sem avançar para a próxima fase).
+ * Acumula a duração final e fecha a linha como 'concluido'.
+ */
+export async function concluirFase(faseId) {
+  const now = new Date().toISOString()
+
+  const { data: fase, error: fetchErr } = await supabase
+    .from('bpmn_fase_historico')
+    .select('eventos, duracao_segundos')
+    .eq('id', faseId)
+    .single()
+  if (fetchErr) throw new Error('Erro ao buscar fase: ' + fetchErr.message)
+
+  const eventos = fase.eventos ?? []
+  const last = eventos[eventos.length - 1]
+  let delta = 0
+  if (last && (last.tipo === 'start' || last.tipo === 'resume')) {
+    delta = Math.round((new Date(now) - new Date(last.em)) / 1000)
+  }
+
+  const { data, error } = await supabase
+    .from('bpmn_fase_historico')
+    .update({
+      status:           'concluido',
+      encerrado_em:     now,
+      duracao_segundos: (fase.duracao_segundos ?? 0) + delta,
+      eventos:          [...eventos, { tipo: 'finish', em: now }],
+    })
+    .eq('id', faseId)
+    .select('*')
+    .single()
+  if (error) throw new Error('Erro ao concluir fase: ' + error.message)
+  return data
+}
+
+/**
+ * Avança o sipoc para uma nova fase:
+ * - Atualiza bpmn_fase_atual (e bpmn_status quando relevante)
+ * - Cria uma linha 'planejado' para a nova fase
+ */
+export async function avancarFase(sipocId, novaFase, consultorId) {
+  // Mapeamento automático de bpmn_status ao avançar fases
+  const statusPorFase = {
+    revisao:    'em_revisao',
+    validacao:  'enviado_validacao',
+    concluido:  'validado',
+    retrabalho: 'rejeitado',
+  }
+
+  const updatesSipoc = { bpmn_fase_atual: novaFase }
+  if (statusPorFase[novaFase]) updatesSipoc.bpmn_status = statusPorFase[novaFase]
+
+  const { error: sipocError } = await supabase
+    .from('sipocs')
+    .update(updatesSipoc)
+    .eq('id', sipocId)
+  if (sipocError) throw new Error('Erro ao atualizar fase do sipoc: ' + sipocError.message)
+
+  // Determinar ciclo para a nova fase (incrementa se já existiu)
+  const { data: ultimoCiclo } = await supabase
+    .from('bpmn_fase_historico')
+    .select('ciclo')
+    .eq('sipoc_id', sipocId)
+    .eq('fase', novaFase)
+    .order('ciclo', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const ciclo = (ultimoCiclo?.ciclo ?? 0) + 1
+
+  const { data, error } = await supabase
+    .from('bpmn_fase_historico')
+    .insert({
+      sipoc_id:        sipocId,
+      consultor_id:    consultorId,
+      fase:            novaFase,
+      ciclo,
+      status:          'planejado',
+      duracao_segundos: 0,
+      eventos:         [],
+    })
+    .select('*')
+    .single()
+  if (error) throw new Error('Erro ao criar nova fase: ' + error.message)
+  return data
+}
+
+/**
+ * Salva o parecer de revisão de um sipoc.
+ */
+export async function salvarParecerRevisao(sipocId, parecer) {
+  const { error } = await supabase
+    .from('sipocs')
+    .update({
+      bpmn_revisao_parecer: parecer,
+      bpmn_revisao_em:      new Date().toISOString(),
+    })
+    .eq('id', sipocId)
+  if (error) throw new Error('Erro ao salvar parecer: ' + error.message)
+}
+
+/**
+ * Atualiza campos informativos do BPMN (drive url, responsável, data prevista, status).
+ */
+export async function atualizarBpmnCampos(sipocId, campos) {
+  const payload = {}
+  if (campos.bpmn_drive_url      !== undefined) payload.bpmn_drive_url      = campos.bpmn_drive_url      || null
+  if (campos.bpmn_responsavel    !== undefined) payload.bpmn_responsavel    = campos.bpmn_responsavel    || null
+  if (campos.bpmn_data_prevista  !== undefined) payload.bpmn_data_prevista  = campos.bpmn_data_prevista  || null
+  if (campos.bpmn_status         !== undefined) payload.bpmn_status         = campos.bpmn_status         || null
+
+  const { error } = await supabase.from('sipocs').update(payload).eq('id', sipocId)
+  if (error) throw new Error('Erro ao atualizar campos BPMN: ' + error.message)
+}
+
+// ──────────────────────────────────────────────
 
 export async function finalizarRespostaCliente(tokenId, sipocId, respostas) {
   await _validarToken(tokenId)

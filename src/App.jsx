@@ -6,7 +6,15 @@ import {
   criarProjeto, listarProjetos, listarProcessos, salvarProcesso,
   gerarTokenAcesso, listarTokensDoSetor, revogarToken, buscarSetorPorToken, verificarSenhaToken,
   deletarProcesso, calcularProgresso, atualizarResponsavelSetor, criarSetor,
+  listarNotificacoes, atualizarStatusNotificacao, contarNotificacoesUnread,
+  buscarDetalhesCliente,
 } from './lib/db';
+import { STATUS_CONFIG } from './lib/constants';
+import CreateProjectModal from './components/CreateProjectModal';
+import ProjectView from './components/ProjectView';
+import BpmnValidacaoView from './components/BpmnValidacaoView';
+import BpmnAcessosPanel from './components/BpmnAcessosPanel'
+import BpmnTab from './components/BpmnTab';
 
 const CONSULTORES = [
   'Guilherme Jesus',
@@ -463,6 +471,7 @@ function App() {
   const [session, setSession]       = useState(null);
   const [clientData, setClientData] = useState(null);
   const [senhaVerificada, setSenhaVerificada] = useState(false);
+  const [validacaoData, setValidacaoData]     = useState(null);
 
   useEffect(() => {
     const init = async () => {
@@ -489,6 +498,22 @@ function App() {
         } catch { }
         localStorage.removeItem('sipoc_client_token');
       }
+
+      // Token de validação BPMN (?vt=)
+      const validacaoToken = params.get('vt');
+      if (validacaoToken) {
+        try {
+          const resp = await fetch(`/api/validar-bpmn?token=${encodeURIComponent(validacaoToken)}`);
+          const data = await resp.json();
+          if (data.ok && data.processo) {
+            window.history.replaceState({}, '', window.location.pathname);
+            setValidacaoData({ token: validacaoToken, ...data.processo });
+            setAppMode('validacao_bpmn');
+            return;
+          }
+        } catch { }
+      }
+
       setAppMode('auth');
     };
     init();
@@ -524,29 +549,60 @@ function App() {
   const [projetos, setProjetos]             = useState([]);
   const [activeProject, setActiveProject]   = useState(null);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [criarProjetoModal, setCriarProjetoModal] = useState(false);
+
+  // ── Página do projeto ─────────────────────────
+  const [projetoDetalhes, setProjetoDetalhes]         = useState(null);
+  const [isLoadingDetalhes, setIsLoadingDetalhes]     = useState(false);
+
+  // ── Notificações ──────────────────────────────
+  const [unreadCounts, setUnreadCounts]         = useState({}); // { [project_id]: n }
+  const [notifications, setNotifications]       = useState([]); // do projeto ativo
+  const [notifModalData, setNotifModalData]     = useState(null); // notif para modal Adicionar SIPOC
+  const [notifSectionOpen, setNotifSectionOpen] = useState(true);
 
   const carregarProjetos = async () => {
     setIsLoadingProjects(true);
-    try { setProjetos(await listarProjetos()); }
-    catch (err) { alert('Não foi possível carregar os projetos: ' + err.message); }
+    try {
+      const lista = await listarProjetos();
+      setProjetos(lista);
+      // Carrega contagem de unread para todos os projetos de uma vez
+      const counts = await contarNotificacoesUnread(lista.map(p => p.id)).catch(() => ({}));
+      setUnreadCounts(counts);
+    } catch (err) { alert('Não foi possível carregar os projetos: ' + err.message); }
     finally { setIsLoadingProjects(false); }
   };
 
-  useEffect(() => { if (appMode === 'consultant') carregarProjetos(); }, [appMode]);
-
-  const criarNovoProjeto = async (e) => {
-    e.preventDefault();
-    const nome = e.target.empresa.value.trim();
-    if (!nome) return;
-    setIsSubmitting(true);
+  const carregarNotificacoes = async (projectId) => {
     try {
-      const p = await criarProjeto(nome);
-      setProjetos(prev => [p, ...prev]);
-      e.target.reset();
-      alert(`✅ Projeto "${nome}" criado!`);
-    } catch (err) { alert('❌ ' + err.message); }
-    finally { setIsSubmitting(false); }
+      const data = await listarNotificacoes(projectId);
+      setNotifications(data);
+    } catch { /* silencia — notificações não bloqueiam o fluxo */ }
   };
+
+  const handleDismissNotif = async (notifId) => {
+    try {
+      await atualizarStatusNotificacao(notifId, 'dismissed');
+      setNotifications(prev => prev.filter(n => n.id !== notifId));
+      setUnreadCounts(prev => ({
+        ...prev,
+        [activeProject.id]: Math.max(0, (prev[activeProject.id] ?? 0) - 1),
+      }));
+    } catch (err) { alert('❌ ' + err.message); }
+  };
+
+  const handleMarkRead = async (notifId) => {
+    try {
+      await atualizarStatusNotificacao(notifId, 'read');
+      setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, status: 'read' } : n));
+      setUnreadCounts(prev => ({
+        ...prev,
+        [activeProject.id]: Math.max(0, (prev[activeProject.id] ?? 0) - 1),
+      }));
+    } catch { /* silencia */ }
+  };
+
+  useEffect(() => { if (appMode === 'consultant') carregarProjetos(); }, [appMode]);
 
   // ── Builder ───────────────────────────────────
   const defaultProcess = {
@@ -571,9 +627,26 @@ function App() {
   const [novoSetorNome,  setNovoSetorNome]        = useState('');
   const [novoSetorResp,  setNovoSetorResp]        = useState('');
 
+  const carregarDetalhes = async (projectId) => {
+    setIsLoadingDetalhes(true);
+    try {
+      const detalhes = await buscarDetalhesCliente(projectId);
+      setProjetoDetalhes(detalhes);
+    } catch (err) { alert('❌ ' + err.message); }
+    finally { setIsLoadingDetalhes(false); }
+  };
+
   const selecionarProjeto = async (proj) => {
+    setActiveProject(proj);
+    setView('project');
+    carregarDetalhes(proj.id);
+  };
+
+  const abrirFerramentas = async (proj) => {
     setActiveProject(proj); setView('builder');
     setSyncStatus({}); setActiveTab('sipoc'); setIsLoadingProcesses(true);
+    setNotifications([]); setNotifSectionOpen(true);
+    carregarNotificacoes(proj.id);
     try {
       const procs = await listarProcessos(proj.id);
       if (procs.length > 0) {
@@ -748,6 +821,8 @@ function App() {
 
   if (appMode === 'client') return <ClientView clientData={clientData} />;
 
+  if (appMode === 'validacao_bpmn') return <BpmnValidacaoView validacaoData={validacaoData} />;
+
   if (appMode === 'auth') return (
     <div className="min-h-screen bg-gradient-to-br from-[#16253e] via-[#1e3257] to-[#0d1927] flex items-center justify-center p-6">
       <div className="w-full max-w-md">
@@ -778,19 +853,31 @@ function App() {
         <div className="max-w-screen-xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img src="/logo-positive.png" alt="P-Excellence" className="h-8 w-auto" />
+            {(view === 'project' || view === 'builder') && (
+              <>
+                <span className="text-slate-600 text-sm mx-1">/</span>
+                <span className="text-slate-300 text-sm font-medium truncate max-w-[180px]">{activeProject?.empresa}</span>
+              </>
+            )}
             {view === 'builder' && (
               <>
                 <span className="text-slate-600 text-sm mx-1">/</span>
-                <span className="text-slate-300 text-sm font-medium">{activeProject?.empresa}</span>
+                <span className="text-slate-500 text-sm">Ferramentas</span>
               </>
             )}
           </div>
 
           <div className="flex items-center gap-3">
-            {view === 'builder' && (
+            {view === 'project' && (
               <button onClick={() => setView('dashboard')}
                 className="text-xs text-slate-400 hover:text-white transition-colors font-medium flex items-center gap-1">
                 ← Dashboard
+              </button>
+            )}
+            {view === 'builder' && (
+              <button onClick={() => { setView('project'); carregarDetalhes(activeProject.id); }}
+                className="text-xs text-slate-400 hover:text-white transition-colors font-medium flex items-center gap-1">
+                ← {activeProject?.empresa}
               </button>
             )}
             {view === 'builder' && (
@@ -812,38 +899,40 @@ function App() {
         </div>
       </header>
 
+      {/* ══ PROJECT ══ */}
+      {view === 'project' && (
+        <ProjectView
+          projeto={projetoDetalhes}
+          isLoading={isLoadingDetalhes}
+          onBack={() => setView('dashboard')}
+          onOpenTools={() => abrirFerramentas(activeProject)}
+          onRefresh={() => carregarDetalhes(activeProject.id)}
+        />
+      )}
+
       {/* ══ DASHBOARD ══ */}
       {view === 'dashboard' && (
-        <main className="max-w-screen-md mx-auto w-full px-6 py-10 space-y-10 flex-1">
+        <main className="max-w-screen-md mx-auto w-full px-6 py-10 flex-1">
 
-          {/* New project */}
+          {/* Header + lista de projetos */}
           <section>
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Novo Projeto</h2>
-            <form onSubmit={criarNovoProjeto}
-              className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex gap-3">
-              <input name="empresa" required placeholder="Nome da empresa cliente"
-                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none
-                           focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all bg-slate-50
-                           placeholder:text-slate-400" />
-              <button type="submit" disabled={isSubmitting}
-                className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-6 py-2.5 rounded-xl font-bold
-                           text-sm transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30 whitespace-nowrap">
-                {isSubmitting ? 'Criando…' : 'Criar projeto'}
-              </button>
-            </form>
-          </section>
-
-          {/* Projects list */}
-          <section>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-6">
               <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                Projetos ativos
-                {projetos.length > 0 && <span className="ml-2 text-[#ecbf03]">{projetos.length}</span>}
+                {projetos.length > 0 && <span className="text-[#ecbf03] mr-1">{projetos.length}</span>}
+                {projetos.length === 1 ? 'projeto' : 'projetos'}
               </h2>
-              <button onClick={carregarProjetos} disabled={isLoadingProjects}
-                className="text-xs text-slate-400 hover:text-[#ecbf03] font-medium transition-colors flex items-center gap-1">
-                {isLoadingProjects ? 'Carregando…' : '↻ Atualizar'}
-              </button>
+              <div className="flex items-center gap-3">
+                <button onClick={carregarProjetos} disabled={isLoadingProjects}
+                  className="text-xs text-slate-400 hover:text-[#ecbf03] font-medium transition-colors flex items-center gap-1">
+                  {isLoadingProjects ? 'Carregando…' : '↻ Atualizar'}
+                </button>
+                <button
+                  onClick={() => setCriarProjetoModal(true)}
+                  className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-5 py-2 rounded-xl font-bold
+                             text-sm transition-all shadow-sm shadow-[#ecbf03]/30 flex items-center gap-1.5">
+                  + Novo projeto
+                </button>
+              </div>
             </div>
 
             {projetos.length === 0 ? (
@@ -868,45 +957,63 @@ function App() {
                         <p className="font-bold text-slate-800 group-hover:text-[#ecbf03] transition-colors truncate">{p.empresa}</p>
                         <p className="text-xs text-slate-400 mt-0.5">{p.dataCriacao}</p>
                       </div>
-                      <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0">
-                        ATIVO
-                      </span>
+                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                        {(() => {
+                          const sc = STATUS_CONFIG[p.statusProjeto] ?? STATUS_CONFIG.em_andamento;
+                          return (
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${sc.cls}`}>
+                              {sc.label}
+                            </span>
+                          );
+                        })()}
+                        {(unreadCounts[p.id] ?? 0) > 0 && (
+                          <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded-full font-bold min-w-[20px] text-center leading-tight">
+                            {unreadCounts[p.id]}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div className="mt-4 space-y-1.5">
-                      {p.avgConsultor !== undefined ? (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] text-slate-400 w-8 flex-shrink-0 font-medium">Cons.</span>
-                            <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                              <div className={`h-1.5 rounded-full transition-all ${p.avgConsultor >= 80 ? 'bg-green-500' : p.avgConsultor >= 40 ? 'bg-amber-500' : 'bg-red-400'}`}
-                                style={{ width: `${p.avgConsultor}%` }} />
-                            </div>
-                            <span className={`text-[10px] font-bold w-7 text-right flex-shrink-0 ${p.avgConsultor >= 80 ? 'text-green-600' : p.avgConsultor >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
-                              {p.avgConsultor}%
+                    <div className="mt-4 space-y-2">
+                      {/* Mapeamentos */}
+                      {p.quantidadeMapeamentos ? (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide">Mapeamentos</span>
+                            <span className="text-[10px] font-bold text-slate-600">
+                              {p.mapeamentosRealizados} / {p.quantidadeMapeamentos}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[9px] text-slate-400 w-8 flex-shrink-0 font-medium">Cli.</span>
-                            <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                              <div className={`h-1.5 rounded-full transition-all ${p.avgCliente >= 80 ? 'bg-green-500' : p.avgCliente >= 40 ? 'bg-amber-500' : 'bg-red-400'}`}
-                                style={{ width: `${p.avgCliente}%` }} />
-                            </div>
-                            <span className={`text-[10px] font-bold w-7 text-right flex-shrink-0 ${p.avgCliente >= 80 ? 'text-green-600' : p.avgCliente >= 40 ? 'text-amber-600' : 'text-red-500'}`}>
-                              {p.avgCliente}%
-                            </span>
+                          <div className="bg-slate-100 rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full transition-all ${
+                                Math.round((p.mapeamentosRealizados / p.quantidadeMapeamentos) * 100) >= 80
+                                  ? 'bg-green-500'
+                                  : Math.round((p.mapeamentosRealizados / p.quantidadeMapeamentos) * 100) >= 40
+                                    ? 'bg-amber-500'
+                                    : 'bg-red-400'
+                              }`}
+                              style={{ width: `${Math.round((p.mapeamentosRealizados / p.quantidadeMapeamentos) * 100)}%` }}
+                            />
                           </div>
-                          <p className="text-[10px] text-slate-400 pt-0.5">{p.totalSipocs} processo{p.totalSipocs !== 1 ? 's' : ''}</p>
-                        </>
+                        </div>
                       ) : (
                         <div className="flex items-center gap-2">
+                          <span className="text-[9px] text-slate-400 font-medium">Cons.</span>
                           <div className="flex-1 bg-slate-100 rounded-full h-1.5">
-                            <div className="bg-[#ecbf03] h-1.5 rounded-full" style={{ width: p.totalSipocs > 0 ? '100%' : '0%' }} />
+                            <div className={`h-1.5 rounded-full transition-all ${p.avgConsultor >= 80 ? 'bg-green-500' : p.avgConsultor >= 40 ? 'bg-amber-500' : 'bg-red-400'}`}
+                              style={{ width: `${p.avgConsultor}%` }} />
                           </div>
-                          <span className="text-xs text-slate-400 font-medium flex-shrink-0">
-                            {p.totalSipocs} processo{p.totalSipocs !== 1 ? 's' : ''}
-                          </span>
+                          <span className="text-[10px] font-bold text-slate-500">{p.avgConsultor}%</span>
                         </div>
                       )}
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] text-slate-400">{p.totalSipocs} processo{p.totalSipocs !== 1 ? 's' : ''}</p>
+                        {p.dataFimProjeto && (
+                          <p className="text-[10px] text-slate-400">
+                            até {new Date(p.dataFimProjeto + 'T00:00:00').toLocaleDateString('pt-BR', { day:'2-digit', month:'short', year:'numeric' })}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </button>
                 ))}
@@ -918,7 +1025,93 @@ function App() {
 
       {/* ══ BUILDER ══ */}
       {view === 'builder' && (
-        <div className="max-w-screen-xl mx-auto px-6 py-6 flex gap-5 flex-1 w-full">
+        <div className="max-w-screen-xl mx-auto px-6 py-6 flex gap-5 flex-1 w-full flex-col">
+
+          {/* ── Seção Atenção (notificações) ── */}
+          {notifications.length > 0 && (
+            <div className="w-full">
+              <button
+                type="button"
+                onClick={() => setNotifSectionOpen(o => !o)}
+                className="flex items-center gap-2 mb-2 group"
+              >
+                <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                <span className="text-xs font-bold text-red-600 uppercase tracking-widest group-hover:text-red-700 transition-colors">
+                  Atenção — {notifications.filter(n => n.status === 'unread').length > 0
+                    ? `${notifications.filter(n => n.status === 'unread').length} nova${notifications.filter(n => n.status === 'unread').length > 1 ? 's' : ''}`
+                    : `${notifications.length} pendente${notifications.length > 1 ? 's' : ''}`}
+                </span>
+                <svg className={`w-3.5 h-3.5 text-red-400 transition-transform duration-200 ${notifSectionOpen ? 'rotate-180' : ''}`}
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {notifSectionOpen && (
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-4 space-y-2">
+                  {notifications.map(n => (
+                    <div key={n.id}
+                      onMouseEnter={() => n.status === 'unread' && handleMarkRead(n.id)}
+                      className={`flex items-start gap-3 p-3 rounded-xl border transition-all
+                        ${n.status === 'unread'
+                          ? 'bg-white border-red-200 shadow-sm'
+                          : 'bg-red-50/60 border-red-100'}`}>
+                      {/* Ícone tipo */}
+                      <div className="w-8 h-8 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                      </div>
+
+                      {/* Conteúdo */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-slate-800">{n.title}</p>
+                          {n.status === 'unread' && (
+                            <span className="text-[9px] font-black bg-red-500 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wide">
+                              Novo
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                          {n.body?.file_name && (
+                            <span className="text-xs text-slate-500 font-mono bg-slate-100 px-1.5 py-0.5 rounded">
+                              {n.body.file_name}
+                            </span>
+                          )}
+                          {n.body?.setor && (
+                            <span className="text-xs text-slate-500">{n.body.setor}</span>
+                          )}
+                          <span className="text-[10px] text-slate-400">
+                            {new Date(n.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Ações */}
+                      <div className="flex gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => setNotifModalData(n)}
+                          className="px-3 py-1.5 rounded-lg bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e]
+                                     text-xs font-bold transition-all shadow-sm shadow-[#ecbf03]/30 whitespace-nowrap">
+                          + SIPOC
+                        </button>
+                        <button
+                          onClick={() => handleDismissNotif(n.id)}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold
+                                     text-slate-500 hover:bg-slate-50 transition-all whitespace-nowrap">
+                          Dispensar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Conteúdo do builder (sidebar + main) ── */}
+          <div className="flex gap-5 flex-1 w-full">
 
           {/* ── Sidebar ── */}
           <aside className="w-56 flex-shrink-0 flex flex-col gap-3">
@@ -1136,7 +1329,8 @@ function App() {
               {[
                 { id: 'sipoc',  label: 'Mapeamento SIPOC' },
                 { id: 'rasci',  label: 'Matriz RASCI' },
-                { id: 'tokens', label: 'Acesso do Cliente' },
+                { id: 'bpmn',   label: 'BPMN' },
+                { id: 'tokens', label: 'Acessos' },
               ].map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                   className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition-all
@@ -1152,7 +1346,7 @@ function App() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden">
 
               {/* Process header */}
-              {activeTab !== 'tokens' && (
+              {activeTab !== 'tokens' && activeTab !== 'bpmn' && (
                 <div className="px-8 pt-7 pb-5 border-b border-slate-100">
                   <div className="flex items-start justify-between gap-6">
                     <div className="flex-1 min-w-0">
@@ -1406,10 +1600,36 @@ function App() {
                 </div>
               )}
 
-              {/* ── TAB: TOKENS ── */}
+              {/* ── TAB: BPMN ── */}
+              {activeTab === 'bpmn' && (
+                <BpmnTab
+                  clienteId={activeProject?.id}
+                  consultorId={session?.user?.id}
+                />
+              )}
+
+              {/* ── TAB: ACESSOS ── */}
               {activeTab === 'tokens' && (
-                <div className="p-8 flex-1">
-                  <TokenPanel setorId={current.setor_id} setorNome={current.setor} />
+                <div className="p-8 flex-1 space-y-8 overflow-y-auto">
+
+                  {/* ── Seção 1: Acesso SIPOC ── */}
+                  <div>
+                    <div className="mb-4">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        Acesso SIPOC
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Link para preenchimento do formulário complementar do mapeamento.
+                      </p>
+                    </div>
+                    <TokenPanel setorId={current.setor_id} setorNome={current.setor} />
+                  </div>
+
+                  <hr className="border-slate-100" />
+
+                  {/* ── Seção 2: Validação BPMN ── */}
+                  <BpmnAcessosPanel processes={processes} />
+
                 </div>
               )}
 
@@ -1430,7 +1650,20 @@ function App() {
             )}
 
           </main>
+          </div>
         </div>
+      )}
+
+      {/* ── Modal: Criar Projeto ── */}
+      {criarProjetoModal && (
+        <CreateProjectModal
+          onClose={() => setCriarProjetoModal(false)}
+          onCreated={(p) => {
+            setProjetos(prev => [p, ...prev]);
+            setCriarProjetoModal(false);
+            selecionarProjeto(p);
+          }}
+        />
       )}
 
       {/* ── Modal: Novo Setor ── */}
@@ -1502,7 +1735,129 @@ function App() {
           </div>
         </div>
       )}
+      {/* ── Modal: Adicionar ao SIPOC (a partir de notificação) ── */}
+      {notifModalData && (
+        <div className="fixed inset-0 bg-slate-900/50 z-50 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setNotifModalData(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+            <div>
+              <h3 className="font-bold text-slate-800 text-lg">Adicionar ao SIPOC</h3>
+              <p className="text-sm text-slate-400 mt-0.5">
+                Arquivo detectado: <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">
+                  {notifModalData.body?.file_name}
+                </span>
+              </p>
+            </div>
+
+            <AddNotifToSipocForm
+              notif={notifModalData}
+              activeProject={activeProject}
+              processes={processes}
+              onConfirm={async (novoProcesso) => {
+                try {
+                  const { supabase_id, setor_id } = await salvarProcesso(activeProject.id, novoProcesso);
+                  const saved = { ...novoProcesso, supabase_id, setor_id, id: supabase_id };
+                  setProcesses(prev => [...prev, saved]);
+                  setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }));
+                  setActiveProcessId(supabase_id);
+                  await handleDismissNotif(notifModalData.id);
+                  setNotifModalData(null);
+                  setView('builder');
+                } catch (err) { alert('❌ ' + err.message); }
+              }}
+              onCancel={() => setNotifModalData(null)}
+            />
+          </div>
+        </div>
+      )}
+
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Formulário inline do modal "Adicionar ao SIPOC"
+// ─────────────────────────────────────────────────────────────────
+
+function AddNotifToSipocForm({ notif, activeProject, onConfirm, onCancel }) {
+  const nomeInicial = notif.body?.file_name
+    ? notif.body.file_name.replace(/\.[^.]+$/, '').trim()
+    : '';
+  const setorInicial = notif.body?.setor ?? '';
+
+  const [nome,  setNome]  = useState(nomeInicial);
+  const [setor, setSetor] = useState(setorInicial);
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!nome.trim()) return;
+    setSaving(true);
+    await onConfirm({
+      id: `p${Date.now()}`,
+      supabase_id: null,
+      setor: setor.trim() || 'Geral',
+      setor_id: null,
+      name: nome.trim(),
+      suppliers: [], inputs: [], outputs: [], customers: [],
+      ferramentas: [], periodicidade: '', tipo: '',
+      inputsPadronizados: '', outputsPadronizados: '', geridoDados: '',
+      tecnologia: '', maturidade: '', esforco: '', impacto: '',
+      observacoes: '',
+      rasci: { r: [], a: [], s: [], c: [], i: [] },
+    });
+    setSaving(false);
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+          Nome do processo
+        </label>
+        <input
+          autoFocus
+          type="text"
+          value={nome}
+          onChange={e => setNome(e.target.value)}
+          placeholder="Nome do processo"
+          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none
+                     focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all
+                     placeholder:text-slate-400"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+          Setor / área
+        </label>
+        <input
+          type="text"
+          value={setor}
+          onChange={e => setSetor(e.target.value)}
+          placeholder="Ex: Financeiro"
+          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm outline-none
+                     focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all
+                     placeholder:text-slate-400"
+        />
+        <p className="text-[10px] text-slate-400 mt-1">
+          Se o setor já existir no projeto será aproveitado; caso contrário será criado.
+        </p>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button type="button" onClick={onCancel}
+          className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold
+                     text-slate-500 hover:bg-slate-50 transition-all">
+          Cancelar
+        </button>
+        <button type="submit" disabled={saving || !nome.trim()}
+          className="flex-1 py-2.5 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e]
+                     font-bold text-sm transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30">
+          {saving ? 'Criando…' : 'Criar processo'}
+        </button>
+      </div>
+    </form>
   );
 }
 
