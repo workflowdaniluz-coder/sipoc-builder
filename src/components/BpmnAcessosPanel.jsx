@@ -24,7 +24,9 @@ function SetorValidacaoItem({ setorNome, setorId, processos }) {
   const [revoking,   setRevoking]   = useState(false)
   const [copied,     setCopied]     = useState(false)
 
-  const emValidacao = processos.filter(p => p.bpmn_fase_atual === 'validacao').length
+  const emValidacao      = processos.filter(p => p.bpmn_fase_atual === 'validacao').length
+  const processosAtivos  = processos.filter(p => p.bpmn_fase_atual !== 'concluido')
+  const todosEmValidacao = processosAtivos.length > 0 && processosAtivos.every(p => p.bpmn_fase_atual === 'validacao')
 
   useEffect(() => {
     if (!setorId) { setTokenLoad(false); setToken(null); return }
@@ -79,7 +81,7 @@ function SetorValidacaoItem({ setorNome, setorId, processos }) {
       </div>
 
       {/* Gestão de token de validação */}
-      {emValidacao > 0 && (
+      {todosEmValidacao && (
         <div className="px-4 py-3 border-b border-slate-100 bg-amber-50">
           <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest mb-2">
             Link de validação por setor

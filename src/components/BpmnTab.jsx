@@ -725,7 +725,9 @@ function SetorGroup({ setorNome, setorId, processos, fasesMap, consultorId, onFa
 
   const concluidos        = processos.filter(p => p.bpmn_fase_atual === 'concluido').length
   const emValidacao       = processos.filter(p => p.bpmn_fase_atual === 'validacao').length
-  const podeGerarLink     = emValidacao > 0 && !!setorId
+  const processosAtivos   = processos.filter(p => p.bpmn_fase_atual !== 'concluido')
+  const todosEmValidacao  = processosAtivos.length > 0 && processosAtivos.every(p => p.bpmn_fase_atual === 'validacao')
+  const podeGerarLink     = todosEmValidacao && !!setorId
 
   // Carregar token ativo ao montar
   useEffect(() => {
