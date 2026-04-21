@@ -9,6 +9,12 @@ import {
   avancarFase,
   salvarParecerRevisao,
   atualizarBpmnCampos,
+  gerarTokenValidacaoBpmn,
+  getTokenValidacaoBpmnBySetor,
+  revogarTokenValidacaoBpmn,
+  getContestacoesPendentes,
+  decidirContestacao,
+  avancarFaseParaRetrabalho,
 } from '../lib/db'
 
 // ── Configuração de fases ─────────────────────────────────────────────────────
@@ -632,12 +638,130 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
   )
 }
 
+// ── ContestacaoCard ───────────────────────────────────────────────────────────
+
+function ContestacaoCard({ contestacao, consultorId, onDecidido }) {
+  const [loading, setLoading] = useState(false)
+
+  const sipocNome = contestacao.sipocs?.nome_processo ?? '—'
+  const setorNome = contestacao.sipocs?.setores?.nome ?? '—'
+  const dataStr   = contestacao.criado_em
+    ? new Date(contestacao.criado_em).toLocaleDateString('pt-BR')
+    : ''
+
+  const handleDecidir = async (decisao) => {
+    if (!window.confirm(
+      decisao === 'aceito'
+        ? `Aceitar contestação? O processo voltará para Retrabalho.`
+        : `Manter validação? O diagrama será considerado aprovado mesmo com a contestação.`
+    )) return
+
+    setLoading(true)
+    try {
+      await decidirContestacao(contestacao.id, decisao, consultorId)
+      let novaFaseRow = null
+      if (decisao === 'aceito') {
+        novaFaseRow = await avancarFaseParaRetrabalho(contestacao.sipoc_id, consultorId)
+      }
+      onDecidido(contestacao.id, decisao, novaFaseRow)
+    } catch (err) {
+      alert('❌ ' + err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border-l-4 border-l-red-500 border border-slate-200 shadow-sm p-4">
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="min-w-0">
+          <p className="font-semibold text-slate-800 text-sm truncate">{sipocNome}</p>
+          <p className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full inline-block mt-0.5">
+            {setorNome}
+          </p>
+        </div>
+        {dataStr && (
+          <p className="text-[10px] text-slate-400 flex-shrink-0">{dataStr}</p>
+        )}
+      </div>
+
+      {contestacao.comentario && (
+        <p className="text-xs text-slate-600 italic bg-red-50 px-3 py-2 rounded-lg mb-3 border border-red-100">
+          "{contestacao.comentario}"
+        </p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleDecidir('aceito')}
+          disabled={loading}
+          className="flex-1 py-2 rounded-xl border border-red-300 text-red-700 text-xs font-bold
+            hover:bg-red-50 transition-all disabled:opacity-50"
+        >
+          Aceitar contestação
+        </button>
+        <button
+          onClick={() => handleDecidir('rejeitado')}
+          disabled={loading}
+          className="flex-1 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold
+            hover:bg-slate-50 transition-all disabled:opacity-50"
+        >
+          Manter validado
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── SetorGroup ────────────────────────────────────────────────────────────────
 
-function SetorGroup({ setorNome, processos, fasesMap, consultorId, onFaseUpdate, onSipocUpdate, onParecer, onHistorico }) {
-  const [expanded, setExpanded] = useState(true)
+function SetorGroup({ setorNome, setorId, processos, fasesMap, consultorId, onFaseUpdate, onSipocUpdate, onParecer, onHistorico }) {
+  const [expanded,   setExpanded]   = useState(true)
+  const [token,      setToken]      = useState(undefined) // undefined=loading, null=sem token
+  const [tokenLoad,  setTokenLoad]  = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [revoking,   setRevoking]   = useState(false)
+  const [copied,     setCopied]     = useState(false)
 
-  const concluidos = processos.filter(p => p.bpmn_fase_atual === 'concluido').length
+  const concluidos        = processos.filter(p => p.bpmn_fase_atual === 'concluido').length
+  const emValidacao       = processos.filter(p => p.bpmn_fase_atual === 'validacao').length
+  const podeGerarLink     = emValidacao > 0 && !!setorId
+
+  // Carregar token ativo ao montar
+  useEffect(() => {
+    if (!setorId) { setTokenLoad(false); setToken(null); return }
+    getTokenValidacaoBpmnBySetor(setorId)
+      .then(t => setToken(t ?? null))
+      .catch(() => setToken(null))
+      .finally(() => setTokenLoad(false))
+  }, [setorId])
+
+  const handleGerar = async () => {
+    setGenerating(true)
+    try {
+      const t = await gerarTokenValidacaoBpmn(setorId)
+      setToken(t)
+      await navigator.clipboard.writeText(t.url)
+      alert(`✅ Link gerado e copiado!\n\n${t.url}\n\nEnvie ao responsável do setor.`)
+    } catch (err) { alert('❌ ' + err.message) }
+    finally { setGenerating(false) }
+  }
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(token.url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleRevogar = async () => {
+    if (!window.confirm(`Revogar o link de validação do setor "${setorNome}"?`)) return
+    setRevoking(true)
+    try {
+      await revogarTokenValidacaoBpmn(token.id)
+      setToken(null)
+    } catch (err) { alert('❌ ' + err.message) }
+    finally { setRevoking(false) }
+  }
 
   return (
     <div className="rounded-2xl border border-slate-200 overflow-hidden">
@@ -656,6 +780,11 @@ function SetorGroup({ setorNome, processos, fasesMap, consultorId, onFaseUpdate,
               {concluidos} concluído{concluidos > 1 ? 's' : ''}
             </span>
           )}
+          {emValidacao > 0 && (
+            <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+              {emValidacao} em validação
+            </span>
+          )}
         </div>
         <svg
           className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
@@ -664,6 +793,59 @@ function SetorGroup({ setorNome, processos, fasesMap, consultorId, onFaseUpdate,
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
+
+      {/* Painel de link de validação — visível quando há processos em validação */}
+      {podeGerarLink && (
+        <div className="px-5 py-3 bg-amber-50 border-t border-amber-100">
+          {tokenLoad ? (
+            <p className="text-xs text-slate-400">Verificando link…</p>
+          ) : token ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                <p className="text-xs font-semibold text-amber-700">Link ativo</p>
+                <p className="text-[10px] text-amber-600">
+                  expira {new Date(token.expira_em).toLocaleDateString('pt-BR')}
+                </p>
+              </div>
+              <p className="font-mono text-[10px] text-slate-500 bg-white px-2.5 py-1.5 rounded-lg truncate border border-slate-200">
+                {token.url}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCopy}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold
+                    text-slate-600 hover:bg-slate-50 bg-white transition-all"
+                >
+                  {copied ? '✅ Copiado' : 'Copiar'}
+                </button>
+                <button
+                  onClick={handleRevogar}
+                  disabled={revoking}
+                  className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-semibold
+                    text-red-500 hover:bg-red-50 bg-white transition-all disabled:opacity-50"
+                >
+                  Revogar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleGerar}
+              disabled={generating}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02]
+                text-[#16253e] font-bold text-xs transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              </svg>
+              {generating ? 'Gerando…' : 'Gerar link de validação'}
+            </button>
+          )}
+        </div>
+      )}
 
       {expanded && (
         <div className="p-4 space-y-3 bg-white">
@@ -695,6 +877,8 @@ export default function BpmnTab({ clienteId, consultorId }) {
   const [ticking,       setTicking]       = useState(0)   // drives live timer re-renders
   const [parecerModal,  setParecerModal]  = useState(null) // sipoc | null
   const [historicoModal,setHistoricoModal]= useState(null) // sipoc | null
+  const [contestacoes,  setContestacoes]  = useState([])
+  const [contestLoad,   setContestLoad]   = useState(false)
 
   // Load data
   useEffect(() => {
@@ -718,6 +902,16 @@ export default function BpmnTab({ clienteId, consultorId }) {
     }
     load()
     return () => { cancelled = true }
+  }, [clienteId])
+
+  // Load contestações pendentes
+  useEffect(() => {
+    if (!clienteId) return
+    setContestLoad(true)
+    getContestacoesPendentes(clienteId)
+      .then(data => setContestacoes(data))
+      .catch(() => {})
+      .finally(() => setContestLoad(false))
   }, [clienteId])
 
   // Tick every second to drive live timers
@@ -763,10 +957,10 @@ export default function BpmnTab({ clienteId, consultorId }) {
     const map = new Map()
     for (const s of sipocs) {
       const key = s.setor_nome ?? 'Geral'
-      if (!map.has(key)) map.set(key, [])
-      map.get(key).push(s)
+      if (!map.has(key)) map.set(key, { setorId: s.setor_id ?? null, processos: [] })
+      map.get(key).processos.push(s)
     }
-    return Array.from(map.entries())
+    return Array.from(map.entries()) // [setorNome, { setorId, processos }]
   }, [sipocs])
 
   const metrics = useMemo(() => {
@@ -821,6 +1015,38 @@ export default function BpmnTab({ clienteId, consultorId }) {
         ))}
       </div>
 
+      {/* Contestações pendentes */}
+      {contestacoes.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+            <p className="text-xs font-black text-slate-700 uppercase tracking-widest">
+              Contestações pendentes ({contestacoes.length})
+            </p>
+          </div>
+          {contestacoes.map(c => (
+            <ContestacaoCard
+              key={c.id}
+              contestacao={c}
+              consultorId={consultorId}
+              onDecidido={(id, decisao, novaFaseRow) => {
+                setContestacoes(prev => prev.filter(x => x.id !== id))
+                if (decisao === 'aceito' && novaFaseRow) {
+                  const sipocId = c.sipoc_id
+                  setSipocs(prev => prev.map(s =>
+                    s.id === sipocId ? { ...s, bpmn_fase_atual: 'retrabalho', bpmn_status: 'rejeitado' } : s
+                  ))
+                  setFasesMap(prev => ({
+                    ...prev,
+                    [sipocId]: [novaFaseRow, ...(prev[sipocId] ?? [])],
+                  }))
+                }
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Content */}
       {sipocs.length === 0 ? (
         <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
@@ -829,10 +1055,11 @@ export default function BpmnTab({ clienteId, consultorId }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {bySetor.map(([setorNome, processos]) => (
+          {bySetor.map(([setorNome, { setorId, processos }]) => (
             <SetorGroup
               key={setorNome}
               setorNome={setorNome}
+              setorId={setorId}
               processos={processos}
               fasesMap={fasesMap}
               consultorId={consultorId}

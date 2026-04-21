@@ -324,6 +324,7 @@ export async function listarProcessos(clienteId) {
       },
       respostas_cliente: sipoc.respostas_cliente ?? {},
       status: sipoc.status ?? 'rascunho',
+      bpmn_fase_atual:          sipoc.bpmn_fase_atual ?? null,
       bpmn_status:              sipoc.bpmn_status ?? null,
       bpmn_drive_url:           sipoc.bpmn_drive_url ?? null,
       bpmn_validado_por:        sipoc.bpmn_validado_por ?? null,
@@ -967,6 +968,195 @@ export async function atualizarBpmnCampos(sipocId, campos) {
 
   const { error } = await supabase.from('sipocs').update(payload).eq('id', sipocId)
   if (error) throw new Error('Erro ao atualizar campos BPMN: ' + error.message)
+}
+
+// ── BPMN Validação por Setor ──────────────────────────────────────────────────
+
+/**
+ * Converte URL do Google Drive para embed preview.
+ */
+export function converterParaEmbedUrl(driveUrl) {
+  if (!driveUrl) return null
+  const m = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (!m) return null
+  return `https://drive.google.com/file/d/${m[1]}/preview`
+}
+
+/**
+ * Gera token de validação BPMN por setor (tokens_acesso, tipo='validacao_bpmn').
+ * Retorna { id, token, url, expira_em }
+ */
+export async function gerarTokenValidacaoBpmn(setorId) {
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) throw new Error('Não autenticado.')
+
+  const { data: setor, error: setorError } = await supabase
+    .from('setores')
+    .select('nome, clientes ( nome )')
+    .eq('id', setorId)
+    .single()
+
+  if (setorError) throw new Error('Setor não encontrado: ' + setorError.message)
+
+  const { data, error } = await supabase
+    .from('tokens_acesso')
+    .insert({
+      setor_id:     setorId,
+      setor_nome:   setor.nome,
+      cliente_nome: setor.clientes.nome,
+      criado_por:   user.id,
+      tipo:         'validacao_bpmn',
+    })
+    .select('id, token, criado_em, expira_em')
+    .single()
+
+  if (error) throw new Error('Erro ao gerar token BPMN: ' + error.message)
+  return { ...data, url: `${window.location.origin}?vb=${data.token}` }
+}
+
+/**
+ * Retorna token de validação BPMN ativo para um setor (ou null).
+ */
+export async function getTokenValidacaoBpmnBySetor(setorId) {
+  const { data, error } = await supabase
+    .from('tokens_acesso')
+    .select('id, token, criado_em, expira_em')
+    .eq('setor_id', setorId)
+    .eq('tipo', 'validacao_bpmn')
+    .is('revogado_em', null)
+    .is('usado_em', null)
+    .gt('expira_em', new Date().toISOString())
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) throw new Error('Erro ao buscar token BPMN: ' + error.message)
+  if (!data) return null
+  return { ...data, url: `${window.location.origin}?vb=${data.token}` }
+}
+
+/**
+ * Revoga token de validação BPMN por setor.
+ */
+export async function revogarTokenValidacaoBpmn(tokenId) {
+  const { error } = await supabase
+    .from('tokens_acesso')
+    .update({ revogado_em: new Date().toISOString() })
+    .eq('id', tokenId)
+
+  if (error) throw new Error('Erro ao revogar token: ' + error.message)
+}
+
+/**
+ * Retorna contestações pendentes (ação='contestado', sem decisão) para um cliente.
+ */
+export async function getContestacoesPendentes(clienteId) {
+  const { data, error } = await supabase
+    .from('bpmn_validacao_cliente')
+    .select(`
+      id, acao, comentario, criado_em,
+      sipoc_id,
+      sipocs (
+        id, nome_processo,
+        setores ( nome, cliente_id )
+      )
+    `)
+    .eq('acao', 'contestado')
+    .is('decisao_consultor', null)
+    .order('criado_em', { ascending: false })
+
+  if (error) throw new Error('Erro ao buscar contestações: ' + error.message)
+
+  return (data ?? []).filter(r => r.sipocs?.setores?.cliente_id === clienteId)
+}
+
+/**
+ * Registra decisão do consultor sobre uma contestação.
+ * decisao: 'aceito' | 'rejeitado'
+ */
+export async function decidirContestacao(validacaoId, decisao, consultorId) {
+  const { error } = await supabase
+    .from('bpmn_validacao_cliente')
+    .update({
+      decisao_consultor:    decisao,
+      decisao_em:           new Date().toISOString(),
+      decisao_consultor_id: consultorId,
+    })
+    .eq('id', validacaoId)
+
+  if (error) throw new Error('Erro ao registrar decisão: ' + error.message)
+}
+
+/**
+ * Avança sipoc para fase retrabalho (após contestação aceita).
+ * Fecha a fase validação ativa e cria linha de retrabalho planejada.
+ */
+export async function avancarFaseParaRetrabalho(sipocId, consultorId) {
+  const now = new Date().toISOString()
+
+  // Fechar fase validacao ativa
+  const { data: faseAberta } = await supabase
+    .from('bpmn_fase_historico')
+    .select('id, eventos, duracao_segundos')
+    .eq('sipoc_id', sipocId)
+    .eq('fase', 'validacao')
+    .in('status', ['em_andamento', 'pausado', 'planejado'])
+    .order('criado_em', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (faseAberta) {
+    const eventos = faseAberta.eventos ?? []
+    const last = eventos[eventos.length - 1]
+    let delta = 0
+    if (last && (last.tipo === 'start' || last.tipo === 'resume')) {
+      delta = Math.round((new Date(now) - new Date(last.em)) / 1000)
+    }
+    await supabase
+      .from('bpmn_fase_historico')
+      .update({
+        status:           'concluido',
+        encerrado_em:     now,
+        duracao_segundos: (faseAberta.duracao_segundos ?? 0) + delta,
+        eventos:          [...eventos, { tipo: 'finish', em: now }],
+      })
+      .eq('id', faseAberta.id)
+  }
+
+  // Atualizar sipoc
+  await supabase
+    .from('sipocs')
+    .update({ bpmn_fase_atual: 'retrabalho', bpmn_status: 'rejeitado' })
+    .eq('id', sipocId)
+
+  // Criar nova linha de retrabalho
+  const { data: ultimoCiclo } = await supabase
+    .from('bpmn_fase_historico')
+    .select('ciclo')
+    .eq('sipoc_id', sipocId)
+    .eq('fase', 'retrabalho')
+    .order('ciclo', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  const ciclo = (ultimoCiclo?.ciclo ?? 0) + 1
+
+  const { data, error } = await supabase
+    .from('bpmn_fase_historico')
+    .insert({
+      sipoc_id:         sipocId,
+      consultor_id:     consultorId,
+      fase:             'retrabalho',
+      ciclo,
+      status:           'planejado',
+      duracao_segundos: 0,
+      eventos:          [],
+    })
+    .select('*')
+    .single()
+
+  if (error) throw new Error('Erro ao criar fase retrabalho: ' + error.message)
+  return data
 }
 
 // ──────────────────────────────────────────────

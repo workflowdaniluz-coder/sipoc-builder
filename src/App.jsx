@@ -15,6 +15,7 @@ import ProjectView from './components/ProjectView';
 import BpmnValidacaoView from './components/BpmnValidacaoView';
 import BpmnAcessosPanel from './components/BpmnAcessosPanel'
 import BpmnTab from './components/BpmnTab';
+import BpmnValidacaoSetorView, { ErroTokenView } from './components/BpmnValidacaoSetorView';
 
 const CONSULTORES = [
   'Guilherme Jesus',
@@ -471,7 +472,9 @@ function App() {
   const [session, setSession]       = useState(null);
   const [clientData, setClientData] = useState(null);
   const [senhaVerificada, setSenhaVerificada] = useState(false);
-  const [validacaoData, setValidacaoData]     = useState(null);
+  const [validacaoData, setValidacaoData]         = useState(null);
+  const [validacaoSetorData, setValidacaoSetorData] = useState(null);
+  const [erroTokenMsg, setErroTokenMsg]             = useState(null);
 
   useEffect(() => {
     const init = async () => {
@@ -499,7 +502,7 @@ function App() {
         localStorage.removeItem('sipoc_client_token');
       }
 
-      // Token de validação BPMN (?vt=)
+      // Token de validação BPMN por processo (?vt=)
       const validacaoToken = params.get('vt');
       if (validacaoToken) {
         try {
@@ -512,6 +515,27 @@ function App() {
             return;
           }
         } catch { }
+      }
+
+      // Token de validação BPMN por setor (?vb=)
+      const vbToken = params.get('vb');
+      if (vbToken) {
+        window.history.replaceState({}, '', window.location.pathname);
+        try {
+          const resp = await fetch(`/api/validar-bpmn-setor?vb=${encodeURIComponent(vbToken)}`);
+          const data = await resp.json();
+          if (data.ok) {
+            setValidacaoSetorData({ ...data });
+            setAppMode('validacao_bpmn_setor');
+          } else {
+            setErroTokenMsg(data.error ?? 'Token inválido ou expirado.');
+            setAppMode('validacao_bpmn_setor_erro');
+          }
+        } catch {
+          setErroTokenMsg('Não foi possível validar o link. Tente novamente.');
+          setAppMode('validacao_bpmn_setor_erro');
+        }
+        return;
       }
 
       setAppMode('auth');
@@ -822,6 +846,12 @@ function App() {
   if (appMode === 'client') return <ClientView clientData={clientData} />;
 
   if (appMode === 'validacao_bpmn') return <BpmnValidacaoView validacaoData={validacaoData} />;
+
+  if (appMode === 'validacao_bpmn_setor')
+    return <BpmnValidacaoSetorView validacaoData={validacaoSetorData} />;
+
+  if (appMode === 'validacao_bpmn_setor_erro')
+    return <ErroTokenView mensagem={erroTokenMsg} />;
 
   if (appMode === 'auth') return (
     <div className="min-h-screen bg-gradient-to-br from-[#16253e] via-[#1e3257] to-[#0d1927] flex items-center justify-center p-6">
