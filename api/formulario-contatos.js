@@ -16,13 +16,22 @@ export default async function handler(req, res) {
     const token = req.query.cf
     if (!token) return res.status(400).json({ ok: false, error: 'Token não informado.' })
 
+    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('[formulario-contatos] Env vars SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configuradas.')
+      return res.status(503).json({ ok: false, error: 'Serviço não configurado (env vars ausentes).' })
+    }
+
     const { data, error } = await supabase
       .from('clientes')
       .select('id, nome')
       .eq('token_formulario', token)
       .single()
 
-    if (error || !data) return res.status(404).json({ ok: false, error: 'Link inválido ou expirado.' })
+    if (error) {
+      console.error('[formulario-contatos] Erro ao buscar token:', error.message, error.code)
+      return res.status(404).json({ ok: false, error: `Erro interno: ${error.message}` })
+    }
+    if (!data) return res.status(404).json({ ok: false, error: 'Link inválido ou expirado.' })
 
     return res.status(200).json({ ok: true, clienteId: data.id, clienteNome: data.nome })
   }

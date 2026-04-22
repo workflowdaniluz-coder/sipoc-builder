@@ -254,11 +254,13 @@ export async function criarProjeto(dados) {
 
 export async function gerarTokenFormulario(clienteId) {
   const token = crypto.randomUUID()
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('clientes')
     .update({ token_formulario: token })
     .eq('id', clienteId)
+    .select('id')
   if (error) throw new Error('Erro ao gerar token: ' + error.message)
+  if (!data?.length) throw new Error('Projeto não encontrado ou sem permissão para salvar o token.')
   return token
 }
 
