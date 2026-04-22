@@ -970,6 +970,79 @@ export async function atualizarBpmnCampos(sipocId, campos) {
   if (error) throw new Error('Erro ao atualizar campos BPMN: ' + error.message)
 }
 
+// ── SIPOC Vínculos ────────────────────────────────────────────────────────────
+
+/**
+ * Retorna todos os vínculos de um sipoc.
+ */
+export async function getVinculos(sipocId) {
+  const { data, error } = await supabase
+    .from('sipoc_vinculos')
+    .select('id, tipo, de, para')
+    .eq('sipoc_id', sipocId)
+    .order('tipo').order('de').order('para')
+  if (error) throw new Error('Erro ao buscar vínculos: ' + error.message)
+  return data ?? []
+}
+
+/**
+ * Cria um vínculo. Retorna o registro criado (ou o existente em caso de conflito).
+ */
+export async function addVinculo(sipocId, tipo, de, para) {
+  const { data, error } = await supabase
+    .from('sipoc_vinculos')
+    .insert({ sipoc_id: sipocId, tipo, de, para })
+    .select('id, tipo, de, para')
+    .single()
+
+  if (error) {
+    if (error.code === '23505') {
+      // Conflito — busca o registro já existente
+      const { data: existing } = await supabase
+        .from('sipoc_vinculos')
+        .select('id, tipo, de, para')
+        .eq('sipoc_id', sipocId).eq('tipo', tipo).eq('de', de).eq('para', para)
+        .single()
+      return existing
+    }
+    throw new Error('Erro ao criar vínculo: ' + error.message)
+  }
+  return data
+}
+
+/**
+ * Remove um vínculo por ID.
+ */
+export async function removeVinculo(vinculoId) {
+  const { error } = await supabase
+    .from('sipoc_vinculos')
+    .delete()
+    .eq('id', vinculoId)
+  if (error) throw new Error('Erro ao remover vínculo: ' + error.message)
+}
+
+/**
+ * Remove todos os vínculos de um chip (quando o chip é apagado do SIPOC).
+ * tipos: array dos tipos a limpar (ex: ['supplier_input', 'input_output'])
+ */
+export async function removeVinculosByChip(sipocId, tipos, chipValor) {
+  if (!tipos.length) return
+  // Onde o chip aparece como 'de'
+  await supabase
+    .from('sipoc_vinculos')
+    .delete()
+    .eq('sipoc_id', sipocId)
+    .in('tipo', tipos)
+    .eq('de', chipValor)
+  // Onde o chip aparece como 'para'
+  await supabase
+    .from('sipoc_vinculos')
+    .delete()
+    .eq('sipoc_id', sipocId)
+    .in('tipo', tipos)
+    .eq('para', chipValor)
+}
+
 // ── BPMN Validação por Setor ──────────────────────────────────────────────────
 
 /**
