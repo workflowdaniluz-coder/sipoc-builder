@@ -17,6 +17,7 @@ import BpmnValidacaoView from './components/BpmnValidacaoView';
 import BpmnAcessosPanel from './components/BpmnAcessosPanel'
 import BpmnTab from './components/BpmnTab';
 import BpmnValidacaoSetorView, { ErroTokenView } from './components/BpmnValidacaoSetorView';
+import FormularioContatosView from './components/FormularioContatosView';
 
 const CONSULTORES = [
   'Guilherme Jesus',
@@ -632,6 +633,7 @@ function App() {
   const [validacaoData, setValidacaoData]         = useState(null);
   const [validacaoSetorData, setValidacaoSetorData] = useState(null);
   const [erroTokenMsg, setErroTokenMsg]             = useState(null);
+  const [formularioContatos, setFormularioContatos] = useState(null); // { clienteId, clienteNome }
 
   useEffect(() => {
     const init = async () => {
@@ -672,6 +674,27 @@ function App() {
             return;
           }
         } catch { }
+      }
+
+      // Formulário de contatos (?cf=)
+      const cfToken = params.get('cf');
+      if (cfToken) {
+        window.history.replaceState({}, '', window.location.pathname);
+        try {
+          const resp = await fetch(`/api/formulario-contatos?cf=${encodeURIComponent(cfToken)}`);
+          const data = await resp.json();
+          if (data.ok) {
+            setFormularioContatos({ clienteId: data.clienteId, clienteNome: data.clienteNome });
+            setAppMode('formulario_contatos');
+          } else {
+            setErroTokenMsg(data.error ?? 'Link inválido.');
+            setAppMode('validacao_bpmn_setor_erro');
+          }
+        } catch {
+          setErroTokenMsg('Não foi possível carregar o formulário.');
+          setAppMode('validacao_bpmn_setor_erro');
+        }
+        return;
       }
 
       // Token de validação BPMN por setor (?vb=)
@@ -1031,6 +1054,9 @@ function App() {
   if (appMode === 'client') return <ClientView clientData={clientData} />;
 
   if (appMode === 'validacao_bpmn') return <BpmnValidacaoView validacaoData={validacaoData} />;
+
+  if (appMode === 'formulario_contatos' && formularioContatos)
+    return <FormularioContatosView clienteId={formularioContatos.clienteId} clienteNome={formularioContatos.clienteNome} />;
 
   if (appMode === 'validacao_bpmn_setor')
     return <BpmnValidacaoSetorView validacaoData={validacaoSetorData} />;

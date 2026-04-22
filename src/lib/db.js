@@ -93,22 +93,34 @@ export async function listarProjetos() {
 }
 
 export async function buscarDetalhesCliente(clienteId) {
-  const { data: c, error } = await supabase
-    .from('clientes')
-    .select(`
-      id, nome, cnpj, criado_em,
-      data_contratacao, data_fim_projeto, quantidade_mapeamentos, status_projeto,
-      escopo_tipo, areas_especificas, expectativa_cliente, maiores_dores,
-      setores (
-        id, nome, responsavel,
-        sipocs ( id, status ),
-        tokens_acesso ( usado_em )
-      )
-    `)
-    .eq('id', clienteId)
-    .single()
+  const [clienteRes, contatosRes] = await Promise.all([
+    supabase
+      .from('clientes')
+      .select(`
+        id, nome, cnpj, criado_em,
+        data_contratacao, data_fim_projeto, quantidade_mapeamentos, status_projeto,
+        escopo_tipo, areas_especificas, expectativa_cliente, maiores_dores,
+        segmento, unidades, colaboradores_total, colaboradores_por_filial,
+        cidade, estado, areas, colaboradores_por_area, processos_por_area,
+        problemas_necessidades, link_drive, tempo_projeto, escopo, data_inicio,
+        token_formulario,
+        setores (
+          id, nome, responsavel,
+          sipocs ( id, status ),
+          tokens_acesso ( usado_em )
+        )
+      `)
+      .eq('id', clienteId)
+      .single(),
+    supabase
+      .from('projeto_contatos')
+      .select('id, nome, setor, cargo, gestao_direta, email, criado_em')
+      .eq('cliente_id', clienteId)
+      .order('criado_em', { ascending: false }),
+  ])
 
-  if (error) throw new Error('Erro ao buscar detalhes do projeto: ' + error.message)
+  if (clienteRes.error) throw new Error('Erro ao buscar detalhes do projeto: ' + clienteRes.error.message)
+  const c = clienteRes.data
 
   const setores   = c.setores ?? []
   const allSipocs = setores.flatMap(s => s.sipocs ?? [])
@@ -129,6 +141,23 @@ export async function buscarDetalhesCliente(clienteId) {
     areasEspecificas:      c.areas_especificas ?? [],
     expectativaCliente:    c.expectativa_cliente,
     maioresDores:          c.maiores_dores,
+    // novos campos
+    segmento:              c.segmento,
+    unidades:              c.unidades,
+    colaboradoresTotal:    c.colaboradores_total,
+    colaboradoresPorFilial:c.colaboradores_por_filial,
+    cidade:                c.cidade,
+    estado:                c.estado,
+    areas:                 c.areas ?? [],
+    colaboradoresPorArea:  c.colaboradores_por_area,
+    processosPorArea:      c.processos_por_area,
+    problemasNecessidades: c.problemas_necessidades,
+    linkDrive:             c.link_drive,
+    tempoProjeto:          c.tempo_projeto,
+    escopo:                c.escopo,
+    dataInicio:            c.data_inicio,
+    tokenFormulario:       c.token_formulario,
+    contatos:              contatosRes.data ?? [],
     totalSetores:          setores.length,
     totalSipocs:           allSipocs.length,
     mapeamentosRealizados: allSipocs.filter(s => s.status === 'em_revisao').length,
@@ -138,16 +167,32 @@ export async function buscarDetalhesCliente(clienteId) {
 
 export async function atualizarCliente(clienteId, dados) {
   const payload = {}
-  if (dados.nome               !== undefined) payload.nome                  = dados.nome
-  if (dados.cnpj               !== undefined) payload.cnpj                  = dados.cnpj || null
-  if (dados.dataContratacao    !== undefined) payload.data_contratacao      = dados.dataContratacao || null
-  if (dados.dataFimProjeto     !== undefined) payload.data_fim_projeto      = dados.dataFimProjeto || null
-  if (dados.quantidadeMapeamentos !== undefined) payload.quantidade_mapeamentos = dados.quantidadeMapeamentos ? Number(dados.quantidadeMapeamentos) : null
-  if (dados.escopoTipo         !== undefined) payload.escopo_tipo           = dados.escopoTipo || null
-  if (dados.areasEspecificas   !== undefined) payload.areas_especificas     = dados.areasEspecificas ?? []
-  if (dados.expectativaCliente !== undefined) payload.expectativa_cliente   = dados.expectativaCliente || null
-  if (dados.maioresDores       !== undefined) payload.maiores_dores         = dados.maioresDores || null
-  if (dados.statusProjeto      !== undefined) payload.status_projeto        = dados.statusProjeto
+  if (dados.nome                  !== undefined) payload.nome                    = dados.nome
+  if (dados.cnpj                  !== undefined) payload.cnpj                    = dados.cnpj || null
+  if (dados.dataContratacao       !== undefined) payload.data_contratacao        = dados.dataContratacao || null
+  if (dados.dataFimProjeto        !== undefined) payload.data_fim_projeto        = dados.dataFimProjeto || null
+  if (dados.quantidadeMapeamentos !== undefined) payload.quantidade_mapeamentos  = dados.quantidadeMapeamentos ? Number(dados.quantidadeMapeamentos) : null
+  if (dados.escopoTipo            !== undefined) payload.escopo_tipo             = dados.escopoTipo || null
+  if (dados.areasEspecificas      !== undefined) payload.areas_especificas       = dados.areasEspecificas ?? []
+  if (dados.expectativaCliente    !== undefined) payload.expectativa_cliente     = dados.expectativaCliente || null
+  if (dados.maioresDores          !== undefined) payload.maiores_dores           = dados.maioresDores || null
+  if (dados.statusProjeto         !== undefined) payload.status_projeto          = dados.statusProjeto
+  // novos campos
+  if (dados.segmento              !== undefined) payload.segmento                = dados.segmento || null
+  if (dados.unidades              !== undefined) payload.unidades                = dados.unidades ? Number(dados.unidades) : null
+  if (dados.colaboradoresTotal    !== undefined) payload.colaboradores_total     = dados.colaboradoresTotal ? Number(dados.colaboradoresTotal) : null
+  if (dados.colaboradoresPorFilial!== undefined) payload.colaboradores_por_filial= dados.colaboradoresPorFilial || null
+  if (dados.cidade                !== undefined) payload.cidade                  = dados.cidade || null
+  if (dados.estado                !== undefined) payload.estado                  = dados.estado || null
+  if (dados.areas                 !== undefined) payload.areas                   = dados.areas ?? []
+  if (dados.colaboradoresPorArea  !== undefined) payload.colaboradores_por_area  = dados.colaboradoresPorArea || null
+  if (dados.processosPorArea      !== undefined) payload.processos_por_area      = dados.processosPorArea || null
+  if (dados.problemasNecessidades !== undefined) payload.problemas_necessidades  = dados.problemasNecessidades || null
+  if (dados.linkDrive             !== undefined) payload.link_drive              = dados.linkDrive || null
+  if (dados.tempoProjeto          !== undefined) payload.tempo_projeto           = dados.tempoProjeto || null
+  if (dados.escopo                !== undefined) payload.escopo                  = dados.escopo || null
+  if (dados.dataInicio            !== undefined) payload.data_inicio             = dados.dataInicio || null
+  if (dados.tokenFormulario       !== undefined) payload.token_formulario        = dados.tokenFormulario || null
 
   const { error } = await supabase.from('clientes').update(payload).eq('id', clienteId)
   if (error) throw new Error('Erro ao atualizar projeto: ' + error.message)
@@ -160,19 +205,22 @@ export async function criarProjeto(dados) {
   const { data: cliente, error: clienteError } = await supabase
     .from('clientes')
     .insert({
-      nome:                    dados.nome,
-      cnpj:                    dados.cnpj || null,
-      criado_por:              user.id,
-      data_contratacao:        dados.dataContratacao || null,
-      data_fim_projeto:        dados.dataFimProjeto || null,
-      quantidade_mapeamentos:  dados.quantidadeMapeamentos ? Number(dados.quantidadeMapeamentos) : null,
-      escopo_tipo:             dados.escopoTipo || null,
-      areas_especificas:       dados.areasEspecificas ?? [],
-      expectativa_cliente:     dados.expectativaCliente || null,
-      maiores_dores:           dados.maioresDores || null,
-      status_projeto:          'em_andamento',
+      nome:                     dados.nome,
+      criado_por:               user.id,
+      status_projeto:           'em_andamento',
+      segmento:                 dados.segmento || null,
+      unidades:                 dados.unidades ? Number(dados.unidades) : null,
+      colaboradores_total:      dados.colaboradoresTotal ? Number(dados.colaboradoresTotal) : null,
+      colaboradores_por_filial: dados.colaboradoresPorFilial || null,
+      cidade:                   dados.cidade || null,
+      estado:                   dados.estado || null,
+      areas:                    dados.areas ?? [],
+      colaboradores_por_area:   dados.colaboradoresPorArea || null,
+      processos_por_area:       dados.processosPorArea || null,
+      problemas_necessidades:   dados.problemasNecessidades || null,
+      link_drive:               dados.linkDrive || null,
     })
-    .select('id, nome, cnpj, criado_em, data_fim_projeto, quantidade_mapeamentos')
+    .select('id, nome, criado_em')
     .single()
 
   if (clienteError) throw new Error('Erro ao criar projeto: ' + clienteError.message)
@@ -187,16 +235,62 @@ export async function criarProjeto(dados) {
   return {
     id:                    cliente.id,
     empresa:               cliente.nome,
-    cnpj:                  cliente.cnpj,
     dataCriacao:           new Date(cliente.criado_em).toLocaleDateString('pt-BR'),
     totalSipocs:           0,
     avgConsultor:          0,
     avgCliente:            0,
     statusProjeto:         'em_andamento',
-    dataFimProjeto:        cliente.data_fim_projeto ?? null,
-    quantidadeMapeamentos: cliente.quantidade_mapeamentos ?? null,
+    dataFimProjeto:        null,
+    quantidadeMapeamentos: null,
     mapeamentosRealizados: 0,
   }
+}
+
+export async function gerarTokenFormulario(clienteId) {
+  const token = crypto.randomUUID()
+  const { error } = await supabase
+    .from('clientes')
+    .update({ token_formulario: token })
+    .eq('id', clienteId)
+  if (error) throw new Error('Erro ao gerar token: ' + error.message)
+  return token
+}
+
+export async function getClienteByTokenFormulario(token) {
+  const { data, error } = await supabase
+    .from('clientes')
+    .select('id, nome')
+    .eq('token_formulario', token)
+    .single()
+  if (error) return null
+  return data
+}
+
+export async function adicionarContato(clienteId, dados) {
+  const { data, error } = await supabase
+    .from('projeto_contatos')
+    .insert({
+      cliente_id:    clienteId,
+      nome:          dados.nome,
+      setor:         dados.setor || null,
+      cargo:         dados.cargo || null,
+      gestao_direta: dados.gestaoDireta || null,
+      email:         dados.email || null,
+    })
+    .select('id, nome, setor, cargo, gestao_direta, email, criado_em')
+    .single()
+  if (error) throw new Error('Erro ao salvar contato: ' + error.message)
+  return data
+}
+
+export async function listarContatos(clienteId) {
+  const { data, error } = await supabase
+    .from('projeto_contatos')
+    .select('id, nome, setor, cargo, gestao_direta, email, criado_em')
+    .eq('cliente_id', clienteId)
+    .order('criado_em', { ascending: false })
+  if (error) throw new Error('Erro ao listar contatos: ' + error.message)
+  return data ?? []
 }
 
 // ──────────────────────────────────────────────
