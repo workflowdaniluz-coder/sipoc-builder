@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { listarSipocs, salvarRespostaCliente, finalizarRespostaCliente } from '../lib/db';
+import { listarSipocs, salvarRespostaCliente, finalizarRespostaCliente, salvarLevantamento } from '../lib/db';
+import LevantamentoForm from './LevantamentoForm';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -7,10 +8,10 @@ function buildEmptyResposta(processo) {
   const inputs = {};
   const outputs = {};
   (processo.inputs || []).filter(s => s.trim()).forEach(name => {
-    inputs[name] = { padronizado: '', ferramentas: [], quem_envia: [], observacoes: '' };
+    inputs[name] = { padronizado: '', ferramentas: [], observacoes: '' };
   });
   (processo.outputs || []).filter(s => s.trim()).forEach(name => {
-    outputs[name] = { padronizado: '', ferramentas: [], quem_recebe: [], observacoes: '' };
+    outputs[name] = { padronizado: '', ferramentas: [], observacoes: '' };
   });
   return {
     inputs,
@@ -199,13 +200,11 @@ function validarFormularioCliente(respostas, processo) {
 
   inputNames.forEach(name => {
     const d = respostas?.inputs?.[name];
-    if (!d?.padronizado)          pendentes.push(`Entrada "${name}" — padronizado`);
-    if (!(d?.quem_envia?.length)) pendentes.push(`Entrada "${name}" — quem envia`);
+    if (!d?.padronizado) pendentes.push(`Entrada "${name}" — padronizado`);
   });
   outputNames.forEach(name => {
     const d = respostas?.outputs?.[name];
-    if (!d?.padronizado)           pendentes.push(`Saída "${name}" — padronizado`);
-    if (!(d?.quem_recebe?.length)) pendentes.push(`Saída "${name}" — quem recebe`);
+    if (!d?.padronizado) pendentes.push(`Saída "${name}" — padronizado`);
   });
   if (!respostas?.processo?.periodicidade)  pendentes.push('Periodicidade');
   if (!respostas?.processo?.volume_esforco) pendentes.push('Volume e esforço');
@@ -235,6 +234,7 @@ export default function ClientView({ clientData }) {
   const [tentouFinalizar, setTentouFinalizar] = useState(false);
   const [showThanks, setShowThanks]           = useState(false);
 
+  const levantamentoRef = useRef(null);
   const draftTimersRef = useRef({});
 
   const persistDraft = useCallback((sipocId, data) => {
@@ -409,11 +409,16 @@ export default function ClientView({ clientData }) {
     setTentouFinalizar(true);
     if (!activeProcessoId) return;
     const v = validarFormularioCliente(respostas[activeProcessoId], activeProcesso);
-    if (!v.valido) return;
+    const levOk = levantamentoRef.current?.validate() ?? true;
+    if (!v.valido || !levOk) return;
     setIsFinalizando(true);
     setFinalizarError('');
     try {
-      await finalizarRespostaCliente(tokenId, activeProcessoId, respostas[activeProcessoId]);
+      const levData = levantamentoRef.current?.getValue();
+      await Promise.all([
+        finalizarRespostaCliente(tokenId, activeProcessoId, respostas[activeProcessoId]),
+        levData ? salvarLevantamento(activeProcessoId, levData) : Promise.resolve(),
+      ]);
       setFinalizadoIds(prev => new Set([...prev, activeProcessoId]));
       setSavedIds(prev => new Set([...prev, activeProcessoId]));
       localStorage.removeItem(`sipoc_draft_${activeProcessoId}`);
@@ -598,14 +603,6 @@ export default function ClientView({ clientData }) {
                           />
                         </div>
                         <div>
-                          <FieldLabel>Quem envia</FieldLabel>
-                          <MultiChipSelect
-                            options={activeProcesso.suppliers || []}
-                            value={activeResposta.inputs[name]?.quem_envia || []}
-                            onChange={v => updateInput(name, 'quem_envia', v)}
-                          />
-                        </div>
-                        <div>
                           <FieldLabel>Observações</FieldLabel>
                           <textarea
                             value={activeResposta.inputs[name]?.observacoes || ''}
@@ -653,14 +650,6 @@ export default function ClientView({ clientData }) {
                             value={activeResposta.outputs[name]?.ferramentas || []}
                             onChange={v => updateOutput(name, 'ferramentas', v)}
                             placeholder="Ex: Tableau, Power BI… (Enter para adicionar)"
-                          />
-                        </div>
-                        <div>
-                          <FieldLabel>Quem recebe</FieldLabel>
-                          <MultiChipSelect
-                            options={activeProcesso.customers || []}
-                            value={activeResposta.outputs[name]?.quem_recebe || []}
-                            onChange={v => updateOutput(name, 'quem_recebe', v)}
                           />
                         </div>
                         <div>
@@ -724,6 +713,9 @@ export default function ClientView({ clientData }) {
                   />
                 </div>
               </SectionCard>
+
+              {/* ── Section 4: Levantamento de processo ── */}
+              <LevantamentoForm ref={levantamentoRef} processo={activeProcesso} />
 
               {/* ── Save bar ── */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-8 py-5 mb-8 space-y-4">

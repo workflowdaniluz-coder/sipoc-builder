@@ -1328,6 +1328,26 @@ export async function avancarFaseParaRetrabalho(sipocId, consultorId) {
 
 // ──────────────────────────────────────────────
 
+export async function salvarLevantamento(sipocId, levantamentoObj) {
+  const { error } = await supabase
+    .from('sipocs')
+    .update({ levantamento_processo: levantamentoObj })
+    .eq('id', sipocId)
+  if (error) throw new Error('Erro ao salvar levantamento: ' + error.message)
+}
+
+export async function getLevantamento(sipocId) {
+  const { data, error } = await supabase
+    .from('sipocs')
+    .select('levantamento_processo')
+    .eq('id', sipocId)
+    .single()
+  if (error) throw new Error('Erro ao buscar levantamento: ' + error.message)
+  return data.levantamento_processo ?? null
+}
+
+// ──────────────────────────────────────────────
+
 export async function finalizarRespostaCliente(tokenId, sipocId, respostas) {
   await _validarToken(tokenId)
 
