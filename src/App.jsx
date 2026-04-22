@@ -8,6 +8,7 @@ import {
   deletarProcesso, calcularProgresso, atualizarResponsavelSetor, criarSetor,
   listarNotificacoes, atualizarStatusNotificacao, contarNotificacoesUnread,
   buscarDetalhesCliente,
+  getVinculos, addVinculo, removeVinculo, removeVinculosByChip,
 } from './lib/db';
 import { STATUS_CONFIG } from './lib/constants';
 import CreateProjectModal from './components/CreateProjectModal';
@@ -225,11 +226,106 @@ const RasciInlineInput = ({ onAdd }) => {
   );
 };
 
+// ─── SIPOC Vínculos ────────────────────────────────────────────────────────────
+
+const VINCULO_CFG = {
+  suppliers: { tipo: 'supplier_input',  role: 'de',   targetKey: 'inputs',    label: 'PROVÊ ENTRADAS',    tiposLimpar: ['supplier_input'],                    openRight: true  },
+  inputs:    { tipo: 'input_output',    role: 'de',   targetKey: 'outputs',   label: 'ALIMENTA SAÍDAS',   tiposLimpar: ['supplier_input','input_output'],      openRight: true  },
+  outputs:   { tipo: 'output_customer', role: 'de',   targetKey: 'customers', label: 'VAI PARA CLIENTES', tiposLimpar: ['input_output','output_customer'],     openRight: true  },
+  customers: { tipo: 'output_customer', role: 'para', targetKey: 'outputs',   label: 'RECEBE SAÍDAS',     tiposLimpar: ['output_customer'],                   openRight: false },
+};
+
+function VinculoPopover({ chipValor, colKey, sipocId, sipocItems, vinculos, onAdd, onRemove, onClose }) {
+  const cfg = VINCULO_CFG[colKey];
+  const popoverRef = useRef(null);
+  const [selectVal, setSelectVal] = useState('');
+  const [adding,    setAdding]    = useState(false);
+
+  // Fechar ao clicar fora
+  useEffect(() => {
+    const handle = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) onClose();
+    };
+    document.addEventListener('mousedown', handle, true);
+    return () => document.removeEventListener('mousedown', handle, true);
+  }, [onClose]);
+
+  const chipVinculos = vinculos.filter(v =>
+    cfg.role === 'de'
+      ? v.tipo === cfg.tipo && v.de   === chipValor
+      : v.tipo === cfg.tipo && v.para === chipValor
+  );
+  const linkedTargets   = chipVinculos.map(v => cfg.role === 'de' ? v.para : v.de);
+  const availableOptions = (sipocItems[cfg.targetKey] || []).filter(s => s.trim() && !linkedTargets.includes(s));
+
+  const handleAdd = async () => {
+    if (!selectVal) return;
+    setAdding(true);
+    try {
+      const newV = cfg.role === 'de'
+        ? await addVinculo(sipocId, cfg.tipo, chipValor, selectVal)
+        : await addVinculo(sipocId, cfg.tipo, selectVal, chipValor);
+      onAdd(newV);
+      setSelectVal('');
+    } catch (err) { alert('❌ ' + err.message); }
+    finally { setAdding(false); }
+  };
+
+  return (
+    <div
+      ref={popoverRef}
+      className={`absolute top-full z-50 bg-white rounded-[10px] border border-slate-200 shadow-lg p-2.5 ${cfg.openRight ? 'left-0' : 'right-0'}`}
+      style={{ width: 200, marginTop: 4 }}
+      onClick={e => e.stopPropagation()}
+      onMouseDown={e => e.stopPropagation()}
+    >
+      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{cfg.label}</p>
+
+      {chipVinculos.length > 0 ? (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {chipVinculos.map(v => {
+            const lbl = cfg.role === 'de' ? v.para : v.de;
+            return (
+              <span key={v.id} className="inline-flex items-center gap-1 bg-[#fffbeb] border border-[#ecbf03] text-[#16253e] text-[11px] font-medium px-1.5 py-0.5 rounded-md">
+                {lbl}
+                <button type="button" aria-label={`Remover vínculo com ${lbl}`}
+                  onClick={() => onRemove(v.id)}
+                  className="text-[#16253e]/50 hover:text-[#16253e] transition-colors leading-none">×</button>
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-[11px] text-slate-400 italic mb-2">Nenhum vínculo</p>
+      )}
+
+      {availableOptions.length > 0 && (
+        <div className="flex gap-1">
+          <select value={selectVal} onChange={e => setSelectVal(e.target.value)}
+            className="flex-1 text-[11px] px-1.5 py-1 rounded-md border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-[#ecbf03] min-w-0">
+            <option value="">Vincular…</option>
+            {availableOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+          <button type="button" onClick={handleAdd} disabled={!selectVal || adding} aria-label="Adicionar vínculo"
+            className="px-2 py-1 rounded-md bg-[#ecbf03] text-[#16253e] text-xs font-bold hover:bg-[#d4ab02] transition-colors disabled:opacity-50 flex-shrink-0">
+            +
+          </button>
+        </div>
+      )}
+      {availableOptions.length === 0 && chipVinculos.length === 0 && (
+        <p className="text-[11px] text-slate-400 italic">Sem opções para vincular</p>
+      )}
+    </div>
+  );
+}
+
 // Coluna do SIPOC — chip input com Enter
-const SIPOCColumn = ({ col, items, globalOutputs, onUpdate }) => {
+const SIPOCColumn = ({ col, items, globalOutputs, onUpdate, sipocId, sipocItems, vinculos, onVinculoAdd, onVinculoRemove, onChipRemove, openPopoverKey, setOpenPopoverKey }) => {
   const [inputVal, setInputVal] = useState('');
   const inputRef = useRef(null);
-  const chips = (items || []).filter(s => s.trim());
+  const chips  = (items || []).filter(s => s.trim());
+  const vcfg   = VINCULO_CFG[col.key];
+  const isReal = sipocId && !String(sipocId).startsWith('p');
 
   const commit = (text) => {
     const t = text.trim();
@@ -242,29 +338,90 @@ const SIPOCColumn = ({ col, items, globalOutputs, onUpdate }) => {
       e.preventDefault();
       commit(inputVal);
     } else if (e.key === 'Backspace' && !inputVal && chips.length > 0) {
+      const chip = chips[chips.length - 1];
+      onChipRemove(col.key, chip);
       onUpdate(col.key, chips.slice(0, -1));
     }
   };
 
   return (
-    <div className="flex flex-col rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-      <div className={`${col.color} px-3 py-2.5 text-center`}>
+    <div className="flex flex-col rounded-xl border border-slate-200 shadow-sm">
+      <div className={`${col.color} px-3 py-2.5 text-center rounded-t-xl`}>
         <span className="text-white font-bold text-xs uppercase tracking-widest">{col.label}</span>
       </div>
       <div
-        className="flex-1 p-3 bg-white min-h-[220px] flex flex-col gap-2 cursor-text"
+        className="flex-1 p-3 bg-white min-h-[220px] flex flex-col gap-2 cursor-text rounded-b-xl"
         onClick={() => inputRef.current?.focus()}
       >
         <div className="flex flex-wrap gap-1.5">
-          {chips.map((chip, idx) => (
-            <span key={idx}
-              className="inline-flex items-center gap-1 bg-slate-800 text-white text-xs font-medium px-2.5 py-1 rounded-md">
-              {chip}
-              <button type="button"
-                onClick={e => { e.stopPropagation(); onUpdate(col.key, chips.filter((_, i) => i !== idx)); }}
-                className="text-slate-400 hover:text-white transition-colors leading-none">×</button>
-            </span>
-          ))}
+          {chips.map((chip, idx) => {
+            const popoverKey  = `${col.key}_${idx}`;
+            const isOpen      = openPopoverKey === popoverKey;
+            const chipVins    = vcfg && isReal
+              ? (vinculos || []).filter(v =>
+                  vcfg.role === 'de'
+                    ? v.tipo === vcfg.tipo && v.de   === chip
+                    : v.tipo === vcfg.tipo && v.para === chip
+                )
+              : [];
+            const hasVinculos = chipVins.length > 0;
+
+            return (
+              <span key={idx} className="relative inline-flex items-center gap-1 bg-slate-800 text-white text-xs font-medium px-2.5 py-1 rounded-md">
+                {chip}
+                {/* Botão de vínculo */}
+                {vcfg && (
+                  <button
+                    type="button"
+                    aria-label={isReal ? `Vínculos de ${chip}` : 'Salve o processo primeiro para vincular'}
+                    title={!isReal ? 'Salve o processo primeiro para vincular' : undefined}
+                    disabled={!isReal}
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (!isReal) return;
+                      setOpenPopoverKey(isOpen ? null : popoverKey);
+                    }}
+                    className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+                      !isReal
+                        ? 'border border-slate-600 bg-transparent cursor-not-allowed opacity-40'
+                        : hasVinculos
+                        ? 'border border-[#ecbf03] bg-[#ecbf03] cursor-pointer'
+                        : 'border border-slate-500 bg-transparent hover:border-slate-300 cursor-pointer'
+                    }`}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                      stroke={hasVinculos ? '#16253e' : 'currentColor'} strokeWidth={2.5}
+                      strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+                      <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+                    </svg>
+                  </button>
+                )}
+                {/* Popover de vínculo */}
+                {isOpen && isReal && vcfg && (
+                  <VinculoPopover
+                    chipValor={chip}
+                    colKey={col.key}
+                    sipocId={sipocId}
+                    sipocItems={sipocItems}
+                    vinculos={vinculos || []}
+                    onAdd={onVinculoAdd}
+                    onRemove={onVinculoRemove}
+                    onClose={() => setOpenPopoverKey(null)}
+                  />
+                )}
+                {/* Remover chip */}
+                <button type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    onChipRemove(col.key, chip);
+                    onUpdate(col.key, chips.filter((_, i) => i !== idx));
+                    if (isOpen) setOpenPopoverKey(null);
+                  }}
+                  className="text-slate-400 hover:text-white transition-colors leading-none">×</button>
+              </span>
+            );
+          })}
         </div>
         <input
           ref={inputRef}
@@ -647,6 +804,8 @@ function App() {
   const [setorResponsavel, setSetorResponsavel]   = useState({}); // { setor_id: nome }
   const [setorDropdownOpen, setSetorDropdownOpen] = useState(null); // setor_id aberto
   const [filtroResponsavel, setFiltroResponsavel] = useState('');
+  const [vinculos,          setVinculos]          = useState([]);
+  const [openPopoverKey,    setOpenPopoverKey]    = useState(null);
   const [novoSetorModal, setNovoSetorModal]       = useState(false);
   const [novoSetorNome,  setNovoSetorNome]        = useState('');
   const [novoSetorResp,  setNovoSetorResp]        = useState('');
@@ -719,6 +878,12 @@ function App() {
     setClienteExpInputs( inputKeys.length  > 0 ? { [inputKeys[0]]:  true } : {});
     setClienteExpOutputs(outputKeys.length > 0 ? { [outputKeys[0]]: true } : {});
   }, [activeProcessId]); // eslint-disable-line
+
+  useEffect(() => {
+    const sid = current.supabase_id;
+    if (!sid || String(sid).startsWith('p')) { setVinculos([]); return; }
+    getVinculos(sid).then(setVinculos).catch(() => {});
+  }, [current.supabase_id]); // eslint-disable-line
 
   const processosPorSetor = useMemo(() =>
     processes.reduce((acc, p) => { (acc[p.setor] ??= []).push(p); return acc; }, {}), [processes]);
@@ -796,6 +961,26 @@ function App() {
 
   const upd   = (f, v) => { markDraft(); const u = [...processes]; u[activeProcessIndex][f] = v; setProcesses(u); };
   const updRasci = (l, tags) => { markDraft(); const u = [...processes]; u[activeProcessIndex].rasci[l] = tags; setProcesses(u); };
+
+  const handleVinculoAdd = (newVinculo) => {
+    setVinculos(prev => [...prev, newVinculo]);
+  };
+  const handleVinculoRemove = (vinculoId) => {
+    setVinculos(prev => prev.filter(v => v.id !== vinculoId));
+    removeVinculo(vinculoId).catch(() => {
+      const sid = current.supabase_id;
+      if (sid && !String(sid).startsWith('p')) getVinculos(sid).then(setVinculos).catch(() => {});
+    });
+  };
+  const handleChipRemove = (colKey, chip) => {
+    const cfg = VINCULO_CFG[colKey];
+    const sid = current.supabase_id;
+    if (!cfg || !sid || String(sid).startsWith('p')) return;
+    setVinculos(prev => prev.filter(v =>
+      !(cfg.tiposLimpar.includes(v.tipo) && (v.de === chip || v.para === chip))
+    ));
+    removeVinculosByChip(sid, cfg.tiposLimpar, chip).catch(() => {});
+  };
 
   // ── Helpers de resposta do cliente ───────────
   const getRC = () => {
@@ -1446,7 +1631,16 @@ function App() {
                         {SIPOC_COLS.slice(0,2).map(col => (
                           <SIPOCColumn key={col.key} col={col} items={current[col.key]}
                             globalOutputs={globalOutputs}
-                            onUpdate={(field, newArr) => upd(field, newArr)} />
+                            onUpdate={(field, newArr) => upd(field, newArr)}
+                            sipocId={current.supabase_id}
+                            sipocItems={current}
+                            vinculos={vinculos}
+                            onVinculoAdd={handleVinculoAdd}
+                            onVinculoRemove={handleVinculoRemove}
+                            onChipRemove={handleChipRemove}
+                            openPopoverKey={openPopoverKey}
+                            setOpenPopoverKey={setOpenPopoverKey}
+                          />
                         ))}
 
                         {/* Process (center) */}
@@ -1475,7 +1669,16 @@ function App() {
                         {SIPOC_COLS.slice(2).map(col => (
                           <SIPOCColumn key={col.key} col={col} items={current[col.key]}
                             globalOutputs={globalOutputs}
-                            onUpdate={(field, newArr) => upd(field, newArr)} />
+                            onUpdate={(field, newArr) => upd(field, newArr)}
+                            sipocId={current.supabase_id}
+                            sipocItems={current}
+                            vinculos={vinculos}
+                            onVinculoAdd={handleVinculoAdd}
+                            onVinculoRemove={handleVinculoRemove}
+                            onChipRemove={handleChipRemove}
+                            openPopoverKey={openPopoverKey}
+                            setOpenPopoverKey={setOpenPopoverKey}
+                          />
                         ))}
                       </div>
                     </>
