@@ -953,11 +953,25 @@ function App() {
     if (!activeProject?.id) { alert('Projeto não selecionado.'); return; }
     clearTimeout(autoSaveTimer.current);
     setIsSubmitting(true);
+    const isNewProcess = !current.supabase_id || current.supabase_id.startsWith('p');
     try {
       const { supabase_id, setor_id } = await salvarProcesso(activeProject.id, current);
       setProcesses(prev => prev.map(p => p.id === current.id ? { ...p, supabase_id, setor_id, id: supabase_id } : p));
       setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }));
       setActiveProcessId(supabase_id);
+
+      // Sincroniza processo novo com Monday.com (fire-and-forget)
+      if (isNewProcess && current.name?.trim() && activeProject.mondayBoardId) {
+        fetch('/api/monday', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'adicionar_processo',
+            boardId: activeProject.mondayBoardId,
+            processoNome: current.name.trim(),
+          }),
+        }).catch(() => {});
+      }
     } catch (err) { alert('❌ ' + err.message); }
     finally { setIsSubmitting(false); }
   };

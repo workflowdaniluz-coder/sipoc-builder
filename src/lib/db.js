@@ -30,6 +30,7 @@ export async function listarProjetos() {
     .select(`
       id, nome, cnpj, criado_em,
       data_contratacao, data_fim_projeto, quantidade_mapeamentos, status_projeto,
+      monday_board_id,
       setores (
         id,
         sipocs (
@@ -88,6 +89,7 @@ export async function listarProjetos() {
       dataFimProjeto:        c.data_fim_projeto ?? null,
       quantidadeMapeamentos: c.quantidade_mapeamentos ?? null,
       mapeamentosRealizados: allSipocs.filter(s => s.status === 'em_revisao').length,
+      mondayBoardId:         c.monday_board_id ?? null,
     }
   })
 }
@@ -103,7 +105,7 @@ export async function buscarDetalhesCliente(clienteId) {
         segmento, unidades, colaboradores_total, colaboradores_por_filial,
         cidade, estado, areas, colaboradores_por_area, processos_por_area,
         problemas_necessidades, link_drive, tempo_projeto, escopo, data_inicio,
-        token_formulario,
+        token_formulario, monday_board_id, monday_folder_id,
         setores (
           id, nome, responsavel,
           sipocs ( id, status ),
@@ -157,6 +159,8 @@ export async function buscarDetalhesCliente(clienteId) {
     escopo:                c.escopo,
     dataInicio:            c.data_inicio,
     tokenFormulario:       c.token_formulario,
+    mondayBoardId:         c.monday_board_id ?? null,
+    mondayFolderId:        c.monday_folder_id ?? null,
     contatos:              contatosRes.data ?? [],
     totalSetores:          setores.length,
     totalSipocs:           allSipocs.length,
@@ -193,6 +197,8 @@ export async function atualizarCliente(clienteId, dados) {
   if (dados.escopo                !== undefined) payload.escopo                  = dados.escopo || null
   if (dados.dataInicio            !== undefined) payload.data_inicio             = dados.dataInicio || null
   if (dados.tokenFormulario       !== undefined) payload.token_formulario        = dados.tokenFormulario || null
+  if (dados.mondayBoardId         !== undefined) payload.monday_board_id         = dados.mondayBoardId || null
+  if (dados.mondayFolderId        !== undefined) payload.monday_folder_id        = dados.mondayFolderId || null
 
   const { error } = await supabase.from('clientes').update(payload).eq('id', clienteId)
   if (error) throw new Error('Erro ao atualizar projeto: ' + error.message)
@@ -254,6 +260,14 @@ export async function gerarTokenFormulario(clienteId) {
     .eq('id', clienteId)
   if (error) throw new Error('Erro ao gerar token: ' + error.message)
   return token
+}
+
+export async function revogarTokenFormulario(clienteId) {
+  const { error } = await supabase
+    .from('clientes')
+    .update({ token_formulario: null })
+    .eq('id', clienteId)
+  if (error) throw new Error('Erro ao revogar token: ' + error.message)
 }
 
 export async function getClienteByTokenFormulario(token) {

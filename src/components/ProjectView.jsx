@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { atualizarCliente, gerarTokenFormulario } from '../lib/db'
+import { atualizarCliente, gerarTokenFormulario, revogarTokenFormulario } from '../lib/db'
 import { STATUS_CONFIG } from '../lib/constants'
 
 const ESTADOS_BR = [
@@ -80,6 +80,7 @@ export default function ProjectView({ projeto, isLoading, onBack, onOpenTools, o
   const [drawerOpen,     setDrawerOpen]     = useState(false)
   const [copiedLink,     setCopiedLink]     = useState(false)
   const [generatingLink, setGeneratingLink] = useState(false)
+  const [revokingLink,   setRevokingLink]   = useState(false)
 
   if (isLoading || !projeto) {
     return (
@@ -127,6 +128,16 @@ export default function ProjectView({ projeto, isLoading, onBack, onOpenTools, o
     await navigator.clipboard.writeText(url)
     setCopiedLink(true)
     setTimeout(() => setCopiedLink(false), 2000)
+  }
+
+  const handleRevogarLink = async () => {
+    if (!window.confirm('Revogar o link atual? Quem tiver o link antigo não conseguirá mais acessar.')) return
+    setRevokingLink(true)
+    try {
+      await revogarTokenFormulario(projeto.id)
+      onRefresh()
+    } catch (err) { alert('❌ ' + err.message) }
+    finally { setRevokingLink(false) }
   }
 
   // Timeline
@@ -218,6 +229,16 @@ export default function ProjectView({ projeto, isLoading, onBack, onOpenTools, o
               </a>
             </div>
           )}
+          {projeto.mondayBoardId && (
+            <div>
+              <p className="text-[10px] text-slate-400 font-semibold uppercase tracking-wide mb-0.5">Monday</p>
+              <a href={`https://p-excellence-company.monday.com/boards/${projeto.mondayBoardId}`}
+                target="_blank" rel="noopener noreferrer"
+                className="text-sm font-semibold text-[#ecbf03] hover:underline truncate block">
+                Abrir cronograma
+              </a>
+            </div>
+          )}
         </div>
       </div>
 
@@ -301,11 +322,18 @@ export default function ProjectView({ projeto, isLoading, onBack, onOpenTools, o
           </div>
           <div className="flex gap-2">
             {projeto.tokenFormulario && (
-              <button onClick={handleCopyLink}
-                className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold
-                           text-slate-600 hover:bg-slate-50 transition-all">
-                {copiedLink ? 'Copiado!' : 'Copiar link'}
-              </button>
+              <>
+                <button onClick={handleCopyLink}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold
+                             text-slate-600 hover:bg-slate-50 transition-all">
+                  {copiedLink ? 'Copiado!' : 'Copiar link'}
+                </button>
+                <button onClick={handleRevogarLink} disabled={revokingLink}
+                  className="px-3 py-1.5 rounded-xl border border-red-200 text-xs font-semibold
+                             text-red-500 hover:bg-red-50 transition-all disabled:opacity-50">
+                  {revokingLink ? '…' : 'Revogar'}
+                </button>
+              </>
             )}
             <button onClick={handleGerarLink} disabled={generatingLink}
               className="px-3 py-1.5 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e]

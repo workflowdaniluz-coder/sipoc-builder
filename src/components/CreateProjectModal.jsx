@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { criarProjeto } from '../lib/db'
+import { criarProjeto, atualizarCliente } from '../lib/db'
 
 const ESTADOS_BR = [
   'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS',
@@ -86,6 +86,22 @@ export default function CreateProjectModal({ onClose, onCreated }) {
         colaboradoresPorArea, processosPorArea,
         problemasNecessidades, linkDrive,
       })
+
+      // Cria pasta no Monday.com em background — não bloqueia o fluxo principal
+      fetch('/api/monday', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'criar_pasta', clienteNome: nome.trim() }),
+      })
+        .then(r => r.json())
+        .then(d => {
+          if (d.ok && d.boardId) {
+            atualizarCliente(p.id, { mondayBoardId: d.boardId, mondayFolderId: d.folderId })
+              .catch(() => {})
+          }
+        })
+        .catch(() => {})
+
       onCreated(p)
     } catch (err) {
       setError(err.message)
