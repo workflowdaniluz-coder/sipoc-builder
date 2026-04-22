@@ -1751,7 +1751,6 @@ function App() {
                                 title={name}>
                                 <div><CFL>Padronizado?</CFL><PillSelect value={rc.inputs[name]?.padronizado||''} onChange={v=>updCI(name,'padronizado',v)} /></div>
                                 <div><CFL>Ferramentas que geram este input</CFL><TagsInput tags={rc.inputs[name]?.ferramentas||[]} onChange={v=>updCI(name,'ferramentas',v)} placeholder="Ex: SAP, Excel… (Enter para adicionar)" /></div>
-                                <div><CFL>Quem envia</CFL><MultiChipSelect options={current.suppliers} value={rc.inputs[name]?.quem_envia||[]} onChange={v=>updCI(name,'quem_envia',v)} /></div>
                                 <div><CFL>Observações</CFL><textarea rows={3} value={rc.inputs[name]?.observacoes||''} onChange={e=>updCI(name,'observacoes',e.target.value)} placeholder="Algo relevante sobre esta entrada..." className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all resize-none placeholder:text-slate-400" /></div>
                               </ExpandableCard>
                             ))
@@ -1777,7 +1776,6 @@ function App() {
                                 title={name}>
                                 <div><CFL>Padronizado?</CFL><PillSelect value={rc.outputs[name]?.padronizado||''} onChange={v=>updCO(name,'padronizado',v)} /></div>
                                 <div><CFL>Ferramentas que consomem este output</CFL><TagsInput tags={rc.outputs[name]?.ferramentas||[]} onChange={v=>updCO(name,'ferramentas',v)} placeholder="Ex: Tableau, Power BI… (Enter para adicionar)" /></div>
-                                <div><CFL>Quem recebe</CFL><MultiChipSelect options={current.customers} value={rc.outputs[name]?.quem_recebe||[]} onChange={v=>updCO(name,'quem_recebe',v)} /></div>
                                 <div><CFL>Observações</CFL><textarea rows={3} value={rc.outputs[name]?.observacoes||''} onChange={e=>updCO(name,'observacoes',e.target.value)} placeholder="Algo relevante sobre esta saída..." className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all resize-none placeholder:text-slate-400" /></div>
                               </ExpandableCard>
                             ))
@@ -1818,6 +1816,70 @@ function App() {
                               className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all resize-none placeholder:text-slate-400" />
                           </div>
                         </div>
+
+                        {/* Card 4 — Levantamento de processo */}
+                        {current.levantamento_processo && (() => {
+                          const lev = current.levantamento_processo;
+                          return (
+                            <div className="rounded-2xl border border-slate-200 p-5 space-y-4">
+                              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
+                                <span className="text-base">🗺️</span>
+                                <div>
+                                  <p className="font-bold text-slate-800 text-sm leading-tight">Como o processo funciona</p>
+                                  <p className="text-xs text-slate-400">Preenchido pelo cliente</p>
+                                </div>
+                              </div>
+
+                              {/* Início */}
+                              {lev.inicio && (
+                                <div className="space-y-2">
+                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span className="w-4 h-4 rounded-full bg-[#16253e] text-white text-[9px] flex items-center justify-center flex-shrink-0">1</span>
+                                    Início
+                                  </p>
+                                  {lev.inicio.gatilho && <div><CFL>O que dá início</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.inicio.gatilho}</p></div>}
+                                  {lev.inicio.responsavel && <div><CFL>Quem inicia</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.inicio.responsavel}</p></div>}
+                                  {lev.inicio.condicao && <div><CFL>Pré-requisito</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.inicio.condicao}</p></div>}
+                                </div>
+                              )}
+
+                              {/* Atividades */}
+                              {lev.atividades?.length > 0 && (
+                                <div className="space-y-3">
+                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Atividades</p>
+                                  {lev.atividades.map((atv, i) => (
+                                    <div key={i} className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-100">
+                                      <p className="text-xs font-bold text-[#ecbf03] uppercase tracking-wide">Atividade {i + 1}</p>
+                                      {atv.descricao && <p className="text-sm text-slate-700">{atv.descricao}</p>}
+                                      {atv.tem_decisao === 'sim' && atv.decisao_qual && (
+                                        <div className="text-xs text-slate-500 space-y-0.5">
+                                          <p><span className="font-semibold">Decisão:</span> {atv.decisao_qual}</p>
+                                          {atv.consequencia_sim && <p><span className="font-semibold">Se sim:</span> {atv.consequencia_sim}</p>}
+                                          {atv.consequencia_nao && <p><span className="font-semibold">Se não:</span> {atv.consequencia_nao}</p>}
+                                        </div>
+                                      )}
+                                      {atv.volta_etapa === 'sim' && <p className="text-xs text-slate-500"><span className="font-semibold">Volta para:</span> atividade anterior</p>}
+                                      {atv.encerra_processo === 'sim' && <span className="inline-block text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Pode encerrar o processo</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Fim */}
+                              {lev.fim && (
+                                <div className="space-y-2">
+                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] flex items-center justify-center flex-shrink-0">✓</span>
+                                    Fim
+                                  </p>
+                                  {lev.fim.resultado && <div><CFL>O que marca o fim</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.fim.resultado}</p></div>}
+                                  {lev.fim.responsavel && <div><CFL>Quem finaliza</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.fim.responsavel}</p></div>}
+                                  {lev.fim.registros && <div><CFL>Registros gerados</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.fim.registros}</p></div>}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                       </div>
                     );
