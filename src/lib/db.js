@@ -1432,7 +1432,7 @@ export async function cancelarOferta(token) {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) throw new Error('Não autenticado.')
 
-  const res = await fetch(`/api/agendamento/cancelar?token=${token}`, {
+  const res = await fetch(`/api/agendamento/token?token=${token}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${session.access_token}` },
   })

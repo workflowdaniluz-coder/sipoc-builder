@@ -63,7 +63,7 @@ export default function AgendarView({ token }) {
     setEnviando(true)
     setErro(null)
     try {
-      const res = await fetch('/api/agendamento/confirmar', {
+      const res = await fetch('/api/agendamento/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token, slots_escolhidos: selecionados }),
