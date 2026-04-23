@@ -47,6 +47,28 @@ export async function deleteHoldEvent({ accessToken, googleEventId }) {
   }
 }
 
+/**
+ * Atualiza evento [HOLD] para confirmado: muda status, título e visibilidade.
+ */
+export async function confirmHoldEvent({ accessToken, googleEventId, clienteNome, tipo }) {
+  try {
+    const resp = await fetch(`${BASE}/${encodeURIComponent(googleEventId)}`, {
+      method: 'PATCH',
+      headers: authHeader(accessToken),
+      body: JSON.stringify({
+        summary: `[CONFIRMADO] ${clienteNome} — ${tipo}`,
+        status: 'confirmed',
+        visibility: 'private',
+      }),
+    })
+    if (!resp.ok && resp.status !== 404 && resp.status !== 410) {
+      console.warn('[google-calendar] confirmHoldEvent status inesperado:', resp.status, googleEventId)
+    }
+  } catch (err) {
+    console.warn('[google-calendar] confirmHoldEvent falhou (ignorado):', googleEventId, err.message)
+  }
+}
+
 // USADO NA CAMADA 5
 export async function createConfirmedEventWithMeet({
   accessToken, summary, description, startISO, endISO,

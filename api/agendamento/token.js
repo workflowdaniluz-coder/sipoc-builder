@@ -5,7 +5,13 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { getAccessTokenForConsultor } from '../_lib/google-auth.js'
-import { deleteHoldEvent } from '../_lib/google-calendar.js'
+import { deleteHoldEvent, confirmHoldEvent } from '../_lib/google-calendar.js'
+
+const TIPO_LABELS = {
+  sipoc: 'Mapeamento SIPOC',
+  bpmn: 'Mapeamento BPMN',
+  validacao_bpmn: 'Validação BPMN',
+}
 
 const ORIGIN = process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br'
 
@@ -30,7 +36,7 @@ async function handleConfirmar(req, res) {
 
   const { data: row, error: fetchErr } = await supabase
     .from('tokens_agendamento')
-    .select('id, qtd_escolha, slots, expira_em, usado_em, revogado_em, clientes(nome), setores(nome)')
+    .select('id, cliente_id, consultor_id, tipo, tipo_customizado, qtd_escolha, slots, expira_em, usado_em, revogado_em, clientes(nome), setores(nome)')
     .eq('token', token)
     .maybeSingle()
 
@@ -58,6 +64,45 @@ async function handleConfirmar(req, res) {
     console.error('[token/confirmar] Erro ao marcar usado:', updateErr.message)
     return res.status(500).json({ ok: false, error: 'Erro ao confirmar agendamento.' })
   }
+
+  // Atualiza Google Calendar e cria notificação — best-effort, não bloqueia resposta
+  Promise.resolve().then(async () => {
+    try {
+      const { accessToken } = await getAccessTokenForConsultor(row.consultor_id)
+      const tipoLabel = row.tipo === 'outra' ? row.tipo_customizado : (TIPO_LABELS[row.tipo] ?? row.tipo)
+      const clienteNome = row.clientes?.nome ?? 'Cliente'
+      const slotsArr = row.slots ?? []
+
+      for (const s of slotsArr) {
+        if (!s.google_hold_event_id) continue
+        if (slots_escolhidos.includes(s.start))
+          await confirmHoldEvent({ accessToken, googleEventId: s.google_hold_event_id, clienteNome, tipo: tipoLabel })
+        else
+          await deleteHoldEvent({ accessToken, googleEventId: s.google_hold_event_id })
+      }
+    } catch (err) {
+      console.warn('[token/confirmar] Google Calendar update falhou:', err.message)
+    }
+
+    try {
+      const fmtSlots = slots_escolhidos.map(s =>
+        new Date(s).toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' })
+      ).join(', ')
+      await supabase.from('notifications').insert({
+        project_id: row.cliente_id,
+        type: 'agendamento_confirmado',
+        title: `${row.clientes?.nome ?? 'Cliente'} confirmou o agendamento`,
+        body: {
+          setor: row.setores?.nome ?? null,
+          tipo: row.tipo === 'outra' ? row.tipo_customizado : (TIPO_LABELS[row.tipo] ?? row.tipo),
+          slots_confirmados: slots_escolhidos,
+          slots_fmt: fmtSlots,
+        },
+      })
+    } catch (err) {
+      console.warn('[token/confirmar] Notificação falhou:', err.message)
+    }
+  })
 
   return res.status(200).json({
     ok: true,
