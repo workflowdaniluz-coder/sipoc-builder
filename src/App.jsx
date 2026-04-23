@@ -1385,11 +1385,11 @@ function App() {
 
             {/* Lista de processos */}
             {total > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Processos</p>
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 pt-4 pb-2 mb-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Processos</p>
                 <div className="divide-y divide-slate-100">
                   {sipocs.map(s => (
-                    <div key={s.id} className="py-2.5 flex items-center gap-3">
+                    <div key={s.id} className="py-2 flex items-center gap-3">
                       <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
                         s.status === 'aprovado' ? 'bg-emerald-400' :
                         s.status === 'em_revisao' ? 'bg-amber-400' : 'bg-slate-300'
@@ -1407,8 +1407,8 @@ function App() {
             )}
 
             {/* Reuniões / Agendamentos */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 pt-4 pb-4">
+              <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reuniões</p>
                 {googleAuth?.conectado && (
                   <button
@@ -1419,11 +1419,11 @@ function App() {
                 )}
               </div>
               {!googleAuth?.conectado ? (
-                <p className="text-sm text-slate-400 text-center py-4">
+                <p className="text-sm text-slate-400 text-center py-2">
                   Conecte o Google Calendar no painel principal para agendar reuniões.
                 </p>
               ) : ofertasAtivas.length === 0 ? (
-                <p className="text-sm text-slate-400 text-center py-4">Nenhuma oferta ativa no momento.</p>
+                <p className="text-sm text-slate-400 text-center py-2">Nenhuma oferta ativa no momento.</p>
               ) : (
                 <div className="divide-y divide-slate-100">
                   {ofertasAtivas.map(o => {
