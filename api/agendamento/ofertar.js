@@ -65,9 +65,9 @@ export default async function handler(req, res) {
   // Valida cliente
   const { data: cliente, error: clienteErr } = await supabase
     .from('clientes').select('id, nome')
-    .eq('id', cliente_id).eq('criado_por', user.id).maybeSingle()
+    .eq('id', cliente_id).maybeSingle()
   if (clienteErr || !cliente)
-    return res.status(403).json({ ok: false, error: 'Cliente não encontrado ou sem permissão.' })
+    return res.status(403).json({ ok: false, error: 'Cliente não encontrado.' })
 
   // Valida setor
   let setorNome = null
