@@ -22,6 +22,7 @@ import BpmnAcessosPanel from './components/BpmnAcessosPanel'
 import BpmnTab from './components/BpmnTab';
 import BpmnValidacaoSetorView, { ErroTokenView } from './components/BpmnValidacaoSetorView';
 import FormularioContatosView from './components/FormularioContatosView';
+import AgendarView from './components/AgendarView';
 
 const CONSULTORES = [
   'Guilherme Jesus',
@@ -639,8 +640,16 @@ function App() {
   const [erroTokenMsg, setErroTokenMsg]             = useState(null);
   const [formularioContatos, setFormularioContatos] = useState(null); // { clienteId, clienteNome }
 
+  const agendarToken = (() => {
+    const m = window.location.pathname.match(/^\/agendar\/([^/]+)$/)
+    return m ? m[1] : null
+  })()
+
   useEffect(() => {
     const init = async () => {
+      // Página pública de agendamento — não requer auth
+      if (agendarToken) { setAppMode('agendar'); return; }
+
       // Consultor autenticado tem sempre prioridade
       const { data: { session: s } } = await supabase.auth.getSession();
       if (s) { setSession(s); setAppMode('consultant'); return; }
@@ -1188,6 +1197,8 @@ function App() {
   // ─────────────────────────────────────────────
   // Roteamento
   // ─────────────────────────────────────────────
+
+  if (appMode === 'agendar') return <AgendarView token={agendarToken} />;
 
   if (appMode === 'loading') return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center">
