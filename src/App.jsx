@@ -739,7 +739,7 @@ function App() {
       setAppMode(prev => {
         if (prev === 'loading') return prev;        // init() ainda não terminou — não interferir
         if (s) return 'consultant';                 // sessão ativa → sempre consultor
-        return prev === 'client' ? prev : 'auth';  // sem sessão → manter cliente ou ir p/ login
+        return (prev === 'client' || prev === 'agendar') ? prev : 'auth';  // sem sessão → manter cliente/agendar ou ir p/ login
       });
     });
     return () => subscription.unsubscribe();
