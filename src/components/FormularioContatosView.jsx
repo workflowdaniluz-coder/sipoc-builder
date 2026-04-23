@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function FormularioContatosView({ clienteId, clienteNome }) {
+export default function FormularioContatosView({ clienteId, clienteNome, token }) {
   const [nome,         setNome]         = useState('')
   const [setor,        setSetor]        = useState('')
   const [cargo,        setCargo]        = useState('')
@@ -21,7 +21,7 @@ export default function FormularioContatosView({ clienteId, clienteNome }) {
       const resp = await fetch('/api/formulario-contatos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clienteId, nome, setor, cargo, gestaoDireta, email }),
+        body: JSON.stringify({ token, clienteId, nome, setor, cargo, gestaoDireta, email }),
       })
       const data = await resp.json()
       if (!data.ok) throw new Error(data.error ?? 'Erro ao enviar')

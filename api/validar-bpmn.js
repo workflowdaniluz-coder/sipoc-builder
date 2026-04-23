@@ -6,6 +6,7 @@
  * POST /api/validar-bpmn
  *   Submete a resposta (aprovar/rejeitar) do responsável do setor.
  *   Payload: { token, acao: 'aprovar'|'rejeitar', comentario?, validado_por }
+ *   Token é revogado atomicamente antes do processamento para evitar race condition.
  */
 
 import { createClient } from '@supabase/supabase-js'
@@ -79,21 +80,23 @@ export default async function handler(req, res) {
     if (acao !== 'aprovar' && acao !== 'rejeitar')
                       return res.status(400).json({ ok: false, error: 'acao deve ser "aprovar" ou "rejeitar"' })
 
-    // 1. Validar token
-    const { data: tokenData, error: tokenError } = await supabase
+    const now = new Date().toISOString()
+
+    // 1. Revogar token atomicamente antes de processar — evita race condition de duplo envio
+    const { data: tokenRevogado, error: revokeError } = await supabase
       .from('tokens_validacao_bpmn')
-      .select('id, sipoc_id')
+      .update({ revogado_em: now })
       .eq('token', token)
       .is('revogado_em', null)
-      .gt('expira_em', new Date().toISOString())
+      .gt('expira_em', now)
+      .select('id, sipoc_id')
       .maybeSingle()
 
-    if (tokenError) return res.status(500).json({ ok: false, error: 'Erro ao validar token: ' + tokenError.message })
-    if (!tokenData)  return res.status(404).json({ ok: false, error: 'Token inválido, expirado ou já utilizado.' })
+    if (revokeError) return res.status(500).json({ ok: false, error: 'Erro ao validar token: ' + revokeError.message })
+    if (!tokenRevogado) return res.status(404).json({ ok: false, error: 'Token inválido, expirado ou já utilizado.' })
 
     const novoBpmnStatus = acao === 'aprovar' ? 'validado'   : 'rejeitado'
     const novaBpmnFase   = acao === 'aprovar' ? 'concluido'  : 'retrabalho'
-    const now            = new Date().toISOString()
 
     // 2. Atualizar sipoc
     const { data: sipocAtualizado, error: sipocError } = await supabase
@@ -105,7 +108,7 @@ export default async function handler(req, res) {
         bpmn_validacao_comentario: comentario?.trim() ?? null,
         bpmn_validado_em:          now,
       })
-      .eq('id', tokenData.sipoc_id)
+      .eq('id', tokenRevogado.sipoc_id)
       .select('nome_processo, setores ( nome, clientes ( id, nome ) )')
       .single()
 
@@ -115,7 +118,7 @@ export default async function handler(req, res) {
     const { data: faseAberta } = await supabase
       .from('bpmn_fase_historico')
       .select('id, eventos, duracao_segundos')
-      .eq('sipoc_id', tokenData.sipoc_id)
+      .eq('sipoc_id', tokenRevogado.sipoc_id)
       .eq('fase', 'validacao')
       .in('status', ['em_andamento', 'pausado'])
       .maybeSingle()
@@ -138,13 +141,7 @@ export default async function handler(req, res) {
         .eq('id', faseAberta.id)
     }
 
-    // 4. Revogar token
-    await supabase
-      .from('tokens_validacao_bpmn')
-      .update({ revogado_em: now })
-      .eq('id', tokenData.id)
-
-    // 5. Criar notificação
+    // 4. Criar notificação
     const projectId = sipocAtualizado.setores?.clientes?.id
     if (projectId) {
       await supabase.from('notifications').insert({

@@ -37,12 +37,25 @@ export default async function handler(req, res) {
   }
 
   // POST — salva contato
+  // Requer o token do formulário para confirmar que o clienteId é legítimo
   if (req.method === 'POST') {
-    const { clienteId, nome, setor, cargo, gestaoDireta, email } = req.body ?? {}
+    const { token, clienteId, nome, setor, cargo, gestaoDireta, email } = req.body ?? {}
 
+    if (!token) return res.status(400).json({ ok: false, error: 'Token não informado.' })
     if (!clienteId || !nome?.trim()) {
       return res.status(400).json({ ok: false, error: 'Dados incompletos.' })
     }
+
+    // Validar que o token pertence ao clienteId informado
+    const { data: cliente, error: tokenError } = await supabase
+      .from('clientes')
+      .select('id')
+      .eq('token_formulario', token)
+      .eq('id', clienteId)
+      .maybeSingle()
+
+    if (tokenError) return res.status(500).json({ ok: false, error: 'Erro ao validar token.' })
+    if (!cliente) return res.status(403).json({ ok: false, error: 'Token inválido para este cliente.' })
 
     const { error } = await supabase
       .from('projeto_contatos')

@@ -5,6 +5,7 @@
  * POST /api/validar-bpmn-setor
  *   Payload: { token, respostas: [{ sipoc_id, acao, comentario? }], comentarioGeral? }
  *   Salva respostas, avança aprovados para concluido, marca token como usado.
+ *   Valida que todos os sipoc_ids pertencem ao setor do token.
  */
 
 import { createClient } from '@supabase/supabase-js'
@@ -32,7 +33,7 @@ export default async function handler(req, res) {
 
     const { data: tokenData, error: tokenError } = await supabase
       .from('tokens_acesso')
-      .select('id, token, setor_id, setor_nome, cliente_nome, expira_em, usado_em')
+      .select('id, setor_id, setor_nome, cliente_nome, expira_em, usado_em')
       .eq('token', vb)
       .eq('tipo', 'validacao_bpmn')
       .is('revogado_em', null)
@@ -57,7 +58,6 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ok:          true,
       tokenId:     tokenData.id,
-      token:       tokenData.token,
       setorNome:   tokenData.setor_nome,
       clienteNome: tokenData.cliente_nome,
       clienteId:   setorData?.clientes?.id ?? null,
@@ -102,6 +102,20 @@ export default async function handler(req, res) {
     if (tokenError) return res.status(500).json({ ok: false, error: 'Erro ao validar token: ' + tokenError.message })
     if (!tokenData) return res.status(404).json({ ok: false, error: 'Token inválido ou expirado.' })
     if (tokenData.usado_em) return res.status(409).json({ ok: false, error: 'Este link já foi utilizado.' })
+
+    // Validar que todos os sipoc_ids pertencem ao setor do token (previne IDOR)
+    const sipocIds = respostas.map(r => r.sipoc_id)
+    const { data: sipocsDosetor, error: sipocCheckError } = await supabase
+      .from('sipocs')
+      .select('id')
+      .eq('setor_id', tokenData.setor_id)
+      .in('id', sipocIds)
+
+    if (sipocCheckError) return res.status(500).json({ ok: false, error: 'Erro ao validar processos.' })
+
+    const idsValidos = new Set((sipocsDosetor ?? []).map(s => s.id))
+    const idInvalido = sipocIds.find(id => !idsValidos.has(id))
+    if (idInvalido) return res.status(403).json({ ok: false, error: 'Processo não pertence ao setor deste token.' })
 
     const now = new Date().toISOString()
 

@@ -684,7 +684,7 @@ function App() {
           const resp = await fetch(`/api/formulario-contatos?cf=${encodeURIComponent(cfToken)}`);
           const data = await resp.json();
           if (data.ok) {
-            setFormularioContatos({ clienteId: data.clienteId, clienteNome: data.clienteNome });
+            setFormularioContatos({ clienteId: data.clienteId, clienteNome: data.clienteNome, token: cfToken });
             setAppMode('formulario_contatos');
           } else {
             setErroTokenMsg(data.error ?? 'Link inválido.');
@@ -964,7 +964,10 @@ function App() {
       if (isNewProcess && current.name?.trim() && activeProject.mondayBoardId) {
         fetch('/api/monday', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token ?? ''}`,
+          },
           body: JSON.stringify({
             action: 'adicionar_processo',
             boardId: activeProject.mondayBoardId,
@@ -1070,7 +1073,7 @@ function App() {
   if (appMode === 'validacao_bpmn') return <BpmnValidacaoView validacaoData={validacaoData} />;
 
   if (appMode === 'formulario_contatos' && formularioContatos)
-    return <FormularioContatosView clienteId={formularioContatos.clienteId} clienteNome={formularioContatos.clienteNome} />;
+    return <FormularioContatosView clienteId={formularioContatos.clienteId} clienteNome={formularioContatos.clienteNome} token={formularioContatos.token} />;
 
   if (appMode === 'validacao_bpmn_setor')
     return <BpmnValidacaoSetorView validacaoData={validacaoSetorData} />;

@@ -25,6 +25,20 @@ async function monday(apiKey, query, variables = {}) {
   return json.data
 }
 
+// Verifica JWT Supabase via admin client
+async function verificarAuth(req) {
+  const { createClient } = await import('@supabase/supabase-js')
+  const url = process.env.SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) return null
+  const authHeader = req.headers['authorization'] ?? ''
+  const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+  if (!jwt) return null
+  const supabase = createClient(url, key)
+  const { data: { user } } = await supabase.auth.getUser(jwt)
+  return user ?? null
+}
+
 // Cria pasta + duplica os 3 boards do template
 async function criarPastaCliente(apiKey, clienteNome) {
   // 1. Cria pasta com o nome do cliente
@@ -92,11 +106,14 @@ async function adicionarProcesso(apiKey, boardId, processoNome) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Método não permitido' })
+
+  const user = await verificarAuth(req)
+  if (!user) return res.status(401).json({ ok: false, error: 'Não autorizado.' })
 
   const apiKey = process.env.MONDAY_API_KEY
   if (!apiKey) return res.status(503).json({ ok: false, error: 'Integração Monday.com não configurada.' })

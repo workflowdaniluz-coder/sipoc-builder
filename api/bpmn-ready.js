@@ -2,6 +2,7 @@
  * POST /api/bpmn-ready
  * Payload: { sipoc_id, drive_url }
  * Converte drive_url para embed URL, salva ambas no sipoc e cria notificação.
+ * Requer consultor autenticado via Authorization: Bearer <supabase_jwt>
  */
 
 import { createClient } from '@supabase/supabase-js'
@@ -13,6 +14,14 @@ function getAdminClient() {
   return createClient(url, key)
 }
 
+async function verificarAuth(req, supabase) {
+  const authHeader = req.headers['authorization'] ?? ''
+  const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
+  if (!jwt) return null
+  const { data: { user } } = await supabase.auth.getUser(jwt)
+  return user ?? null
+}
+
 function converterParaEmbedUrl(driveUrl) {
   if (!driveUrl) return null
   const m = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/)
@@ -21,12 +30,17 @@ function converterParaEmbedUrl(driveUrl) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type')
 
   if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(405).json({ ok: false, error: 'Método não permitido' })
+
+  const supabase = getAdminClient()
+
+  const user = await verificarAuth(req, supabase)
+  if (!user) return res.status(401).json({ ok: false, error: 'Não autorizado.' })
 
   const { sipoc_id, drive_url } = req.body ?? {}
   if (!sipoc_id) return res.status(400).json({ ok: false, error: 'sipoc_id é obrigatório' })
@@ -34,8 +48,6 @@ export default async function handler(req, res) {
 
   const embed_url = converterParaEmbedUrl(drive_url)
   if (!embed_url) return res.status(400).json({ ok: false, error: 'drive_url inválida — não foi possível extrair o FILE_ID' })
-
-  const supabase = getAdminClient()
 
   const { data: sipoc, error: sipocError } = await supabase
     .from('sipocs')
