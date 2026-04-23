@@ -10,7 +10,9 @@ import {
   buscarDetalhesCliente,
   getVinculos, addVinculo, removeVinculo, removeVinculosByChip,
   getGoogleAuthStatus,
-  criarReuniaoManual,
+  ofertarDisponibilidade,
+  cancelarOferta,
+  listarTokensAgendamentoPorSetor,
 } from './lib/db';
 import { STATUS_CONFIG } from './lib/constants';
 import CreateProjectModal from './components/CreateProjectModal';
@@ -825,48 +827,77 @@ function App() {
     finally { setGoogleAuthLoading(false); }
   };
 
-  // ── Modal de teste de evento Google Calendar ──
-  // TODO: Substituir pelo modal de agendamento real na camada 4
-  const [testeModalOpen, setTesteModalOpen]     = useState(false);
-  const [testeForm, setTesteForm]               = useState({
-    cliente_id: '', setor_id: '', tipo: 'sipoc', tipo_customizado: '',
-    duracao_min: 60, scheduled_at: '', participantes: [],
+  // ── Modal de agendamento (ofertar disponibilidade) ──
+  const [agendarModalOpen, setAgendarModalOpen] = useState(false);
+  const [agendarForm, setAgendarForm]           = useState({
+    tipo: 'sipoc', tipo_customizado: '',
+    duracao_min: 60, sipoc_ids: [], slots: [''], qtd_escolha: 1,
+    participantes_sugeridos: [],
   });
-  const [testeParticipanteInput, setTesteParticipanteInput] = useState({ nome: '', email: '' });
-  const [testeSetores, setTesteSetores]         = useState([]);
-  const [testeLoading, setTesteLoading]         = useState(false);
-  const [testeResultado, setTesteResultado]     = useState(null); // { titulo, meet_url, htmlLink }
+  const [agendarParticipanteInput, setAgendarParticipanteInput] = useState({ nome: '', email: '' });
+  const [agendarLoading, setAgendarLoading]     = useState(false);
+  const [agendarResultado, setAgendarResultado] = useState(null); // { token, link, expira_em, slots_count, qtd_escolha }
+  const [ofertasAtivas, setOfertasAtivas]       = useState([]);
+  const [ofertasCancelando, setOfertasCancelando] = useState(new Set());
 
-  const handleTesteClienteChange = async (clienteId) => {
-    setTesteForm(f => ({ ...f, cliente_id: clienteId, setor_id: '' }));
-    if (!clienteId) { setTesteSetores([]); return; }
-    const { data } = await supabase.from('setores').select('id, nome').eq('cliente_id', clienteId).order('nome');
-    setTesteSetores(data ?? []);
+  const abrirAgendarModal = () => {
+    setAgendarResultado(null);
+    setAgendarForm({
+      tipo: 'sipoc', tipo_customizado: '',
+      duracao_min: 60, sipoc_ids: [], slots: [''], qtd_escolha: 1,
+      participantes_sugeridos: [],
+    });
+    setAgendarParticipanteInput({ nome: '', email: '' });
+    setAgendarModalOpen(true);
   };
 
-  const handleTesteSubmit = async () => {
-    if (!testeForm.cliente_id) return alert('Selecione um cliente.');
-    if (!testeForm.scheduled_at) return alert('Informe data e hora.');
-    if (testeForm.tipo === 'outra' && !testeForm.tipo_customizado.trim()) return alert('Informe o tipo customizado.');
-    const minDate = new Date(Date.now() + 10 * 60 * 1000);
-    if (new Date(testeForm.scheduled_at) < minDate) return alert('Horário deve ser pelo menos 10 minutos no futuro.');
-
-    setTesteLoading(true);
+  const carregarOfertasAtivas = async (setorId) => {
     try {
-      const result = await criarReuniaoManual({
-        cliente_id: testeForm.cliente_id,
-        setor_id: testeForm.setor_id || null,
-        tipo: testeForm.tipo,
-        tipo_customizado: testeForm.tipo === 'outra' ? testeForm.tipo_customizado.trim() : null,
-        duracao_min: Number(testeForm.duracao_min),
-        scheduled_at: new Date(testeForm.scheduled_at).toISOString(),
-        participantes: testeForm.participantes,
+      const data = await listarTokensAgendamentoPorSetor(setorId);
+      setOfertasAtivas(data);
+    } catch { /* silencia */ }
+  };
+
+  const handleOfertarSubmit = async () => {
+    const slotsValidos = agendarForm.slots.filter(s => s.trim());
+    if (slotsValidos.length < 2) return alert('Informe pelo menos 2 horários disponíveis.');
+    if (agendarForm.tipo === 'outra' && !agendarForm.tipo_customizado.trim()) return alert('Informe o tipo customizado.');
+    const minFuturo = Date.now() + 60 * 60 * 1000;
+    for (const s of slotsValidos) {
+      if (new Date(s).getTime() < minFuturo) return alert('Todos os horários devem ser pelo menos 1h no futuro.');
+    }
+    setAgendarLoading(true);
+    try {
+      const result = await ofertarDisponibilidade({
+        cliente_id: activeProject.id,
+        setor_id: activeSetor.id,
+        tipo: agendarForm.tipo,
+        tipo_customizado: agendarForm.tipo === 'outra' ? agendarForm.tipo_customizado.trim() : undefined,
+        duracao_min: agendarForm.duracao_min,
+        sipoc_ids: agendarForm.sipoc_ids,
+        slots: slotsValidos,
+        qtd_escolha: agendarForm.qtd_escolha,
+        participantes_sugeridos: agendarForm.participantes_sugeridos,
       });
-      setTesteResultado(result);
+      setAgendarResultado(result);
+      carregarOfertasAtivas(activeSetor.id);
     } catch (err) {
       alert('Erro: ' + err.message);
     } finally {
-      setTesteLoading(false);
+      setAgendarLoading(false);
+    }
+  };
+
+  const handleCancelarOferta = async (token) => {
+    if (!confirm('Cancelar esta oferta? Os horários reservados no Google Calendar serão liberados.')) return;
+    setOfertasCancelando(prev => new Set(prev).add(token));
+    try {
+      await cancelarOferta(token);
+      setOfertasAtivas(prev => prev.filter(o => o.token !== token));
+    } catch (err) {
+      alert('Erro ao cancelar: ' + err.message);
+    } finally {
+      setOfertasCancelando(prev => { const s = new Set(prev); s.delete(token); return s; });
     }
   };
 
@@ -959,6 +990,8 @@ function App() {
   const selecionarSetor = (setor) => {
     setActiveSetor(setor);
     setView('setor');
+    setOfertasAtivas([]);
+    carregarOfertasAtivas(setor.id);
   };
 
   const abrirFerramentas = async (proj, setor = null) => {
@@ -1373,43 +1406,55 @@ function App() {
               </div>
             )}
 
-            {/* Reuniões */}
-            {(() => {
-              const isProd = window.location.hostname === 'app.p-excellence.com.br';
-              if (!isProd) return null;
-              return (
-                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reuniões</p>
-                    {googleAuth?.conectado && (
-                      /* TODO: Substituir pelo modal de agendamento real na camada 4 */
-                      <button
-                        onClick={() => {
-                          setTesteResultado(null);
-                          setTesteForm({
-                            cliente_id: activeProject.id,
-                            setor_id: activeSetor.id,
-                            tipo: 'sipoc', tipo_customizado: '',
-                            duracao_min: 60, scheduled_at: '', participantes: [],
-                          });
-                          setTesteSetores([{ id: activeSetor.id, nome: activeSetor.nome }]);
-                          setTesteModalOpen(true);
-                        }}
-                        className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow-sm">
-                        + Agendar reunião
-                      </button>
-                    )}
-                  </div>
-                  {!googleAuth?.conectado ? (
-                    <p className="text-sm text-slate-400 text-center py-4">
-                      Conecte o Google Calendar no painel principal para agendar reuniões.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-slate-400 text-center py-4">Nenhuma reunião agendada ainda.</p>
-                  )}
+            {/* Reuniões / Agendamentos */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div className="flex items-center justify-between mb-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reuniões</p>
+                {googleAuth?.conectado && (
+                  <button
+                    onClick={abrirAgendarModal}
+                    className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow-sm">
+                    + Agendar reunião
+                  </button>
+                )}
+              </div>
+              {!googleAuth?.conectado ? (
+                <p className="text-sm text-slate-400 text-center py-4">
+                  Conecte o Google Calendar no painel principal para agendar reuniões.
+                </p>
+              ) : ofertasAtivas.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-4">Nenhuma oferta ativa no momento.</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {ofertasAtivas.map(o => {
+                    const tipoLabel = { sipoc: 'SIPOC', bpmn: 'BPMN', validacao_bpmn: 'Validação BPMN', outra: o.tipo_customizado }[o.tipo] ?? o.tipo;
+                    const link = `${window.location.origin}/agendar/${o.token}`;
+                    return (
+                      <div key={o.id} className="py-3 flex items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-slate-700">{tipoLabel} · {o.duracao_min} min</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{o.slots.length} horários · {o.qtd_escolha} escolha{o.qtd_escolha > 1 ? 's' : ''}</p>
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <input readOnly value={link}
+                              className="flex-1 text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-600 font-mono truncate" />
+                            <button onClick={() => navigator.clipboard.writeText(link)}
+                              className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 rounded-lg border border-slate-200 hover:border-slate-300 transition-colors flex-shrink-0">
+                              Copiar
+                            </button>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleCancelarOferta(o.token)}
+                          disabled={ofertasCancelando.has(o.token)}
+                          className="text-xs text-red-400 hover:text-red-600 transition-colors flex-shrink-0 mt-0.5 disabled:opacity-40">
+                          {ofertasCancelando.has(o.token) ? '…' : 'Cancelar'}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })()}
+              )}
+            </div>
           </main>
         )
       })()}
@@ -2310,134 +2355,184 @@ function App() {
         </div>
       )}
 
-      {/* ── Modal: Criar Projeto ── */}
-      {/* ── Modal: Evento de teste Google Calendar ── */}
-      {/* TODO: Substituir pelo modal de agendamento real na camada 4 */}
-      {testeModalOpen && (
+      {/* ── Modal: Agendar Reunião (ofertar disponibilidade) ── */}
+      {agendarModalOpen && (
         <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4"
-          onClick={e => { if (e.target === e.currentTarget) setTesteModalOpen(false); }}>
+          onClick={e => { if (e.target === e.currentTarget) setAgendarModalOpen(false); }}>
           <div className="bg-[#1a2f4e] border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-bold text-white text-base">Criar evento de teste</h3>
-              <button onClick={() => setTesteModalOpen(false)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
+              <div>
+                <h3 className="font-bold text-white text-base">Agendar reunião</h3>
+                {activeSetor && <p className="text-xs text-slate-400 mt-0.5">{activeProject?.empresa} · {activeSetor.nome}</p>}
+              </div>
+              <button onClick={() => setAgendarModalOpen(false)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
             </div>
 
-            {testeResultado ? (
+            {agendarResultado ? (
               <div className="space-y-4">
                 <div className="bg-emerald-900/30 border border-emerald-700/40 rounded-xl p-4">
-                  <p className="text-emerald-300 font-semibold text-sm mb-1">Evento criado!</p>
-                  <p className="text-slate-300 text-xs mb-3">{testeResultado.titulo}</p>
-                  {testeResultado.meet_url && (
-                    <div className="mb-2">
-                      <p className="text-xs text-slate-400 mb-1">Link do Meet:</p>
-                      <div className="flex items-center gap-2">
-                        <input readOnly value={testeResultado.meet_url}
-                          className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono" />
-                        <button onClick={() => { navigator.clipboard.writeText(testeResultado.meet_url); alert('Copiado!'); }}
-                          className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition-colors">
-                          Copiar
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  <p className="text-emerald-300 font-semibold text-sm mb-1">Link gerado!</p>
+                  <p className="text-slate-400 text-xs mb-3">
+                    {agendarResultado.slots_count} horários disponíveis · cliente escolhe {agendarResultado.qtd_escolha}
+                  </p>
+                  <p className="text-xs text-slate-400 mb-1">Link para o cliente:</p>
+                  <div className="flex items-center gap-2">
+                    <input readOnly value={agendarResultado.link}
+                      className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono" />
+                    <button onClick={() => { navigator.clipboard.writeText(agendarResultado.link); }}
+                      className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
+                      Copiar
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">
+                    Expira em: {new Date(agendarResultado.expira_em).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                  </p>
                 </div>
-                <button onClick={() => setTesteModalOpen(false)}
+                <button onClick={() => setAgendarModalOpen(false)}
                   className="w-full bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] py-2 rounded-xl font-bold text-sm transition-all">
                   Fechar
                 </button>
               </div>
             ) : (
               <div className="space-y-4">
-                {/* Cliente */}
-                <div>
-                  <label className="text-xs text-slate-400 font-medium block mb-1">Cliente *</label>
-                  <select value={testeForm.cliente_id} onChange={e => handleTesteClienteChange(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200">
-                    <option value="">Selecione…</option>
-                    {projetos.map(p => <option key={p.id} value={p.id}>{p.empresa}</option>)}
-                  </select>
-                </div>
-
-                {/* Setor */}
-                <div>
-                  <label className="text-xs text-slate-400 font-medium block mb-1">Setor</label>
-                  <select value={testeForm.setor_id} onChange={e => setTesteForm(f => ({ ...f, setor_id: e.target.value }))}
-                    className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200"
-                    disabled={!testeSetores.length}>
-                    <option value="">Nenhum</option>
-                    {testeSetores.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
-                  </select>
-                </div>
-
                 {/* Tipo */}
                 <div>
-                  <label className="text-xs text-slate-400 font-medium block mb-2">Tipo *</label>
+                  <label className="text-xs text-slate-400 font-medium block mb-2">Tipo de reunião *</label>
                   <div className="flex flex-wrap gap-2">
                     {[['sipoc','SIPOC'],['bpmn','BPMN'],['validacao_bpmn','Validação BPMN'],['outra','Outra']].map(([v,l]) => (
-                      <button key={v} onClick={() => setTesteForm(f => ({ ...f, tipo: v, tipo_customizado: '' }))}
-                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${testeForm.tipo === v ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
+                      <button key={v} onClick={() => setAgendarForm(f => ({ ...f, tipo: v, tipo_customizado: '' }))}
+                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${agendarForm.tipo === v ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
                         {l}
                       </button>
                     ))}
                   </div>
-                  {testeForm.tipo === 'outra' && (
-                    <input value={testeForm.tipo_customizado}
-                      onChange={e => setTesteForm(f => ({ ...f, tipo_customizado: e.target.value }))}
+                  {agendarForm.tipo === 'outra' && (
+                    <input value={agendarForm.tipo_customizado}
+                      onChange={e => setAgendarForm(f => ({ ...f, tipo_customizado: e.target.value }))}
                       placeholder="Descreva o tipo…"
                       className="mt-2 w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
                   )}
                 </div>
+
+                {/* Processos */}
+                {(() => {
+                  const sipocOptions = activeSetor?.sipocs ?? [];
+                  if (!sipocOptions.length) return null;
+                  return (
+                    <div>
+                      <label className="text-xs text-slate-400 font-medium block mb-2">Processos relacionados</label>
+                      <div className="flex flex-wrap gap-2">
+                        {sipocOptions.map(s => {
+                          const sel = agendarForm.sipoc_ids.includes(s.id);
+                          return (
+                            <button key={s.id} onClick={() => setAgendarForm(f => ({
+                              ...f,
+                              sipoc_ids: sel ? f.sipoc_ids.filter(id => id !== s.id) : [...f.sipoc_ids, s.id],
+                            }))}
+                              className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${sel ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
+                              {s.nomeProcesso || 'Processo'}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Duração */}
                 <div>
                   <label className="text-xs text-slate-400 font-medium block mb-2">Duração *</label>
                   <div className="flex gap-2">
                     {[[60,'60 min'],[120,'120 min']].map(([v,l]) => (
-                      <button key={v} onClick={() => setTesteForm(f => ({ ...f, duracao_min: v }))}
-                        className={`text-xs px-4 py-1.5 rounded-lg border font-medium transition-colors ${testeForm.duracao_min === v ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
+                      <button key={v} onClick={() => setAgendarForm(f => ({ ...f, duracao_min: v }))}
+                        className={`text-xs px-4 py-1.5 rounded-lg border font-medium transition-colors ${agendarForm.duracao_min === v ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
                         {l}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {/* Data/hora */}
+                {/* Slots */}
                 <div>
-                  <label className="text-xs text-slate-400 font-medium block mb-1">Data e hora *</label>
-                  <input type="datetime-local" value={testeForm.scheduled_at}
-                    onChange={e => setTesteForm(f => ({ ...f, scheduled_at: e.target.value }))}
-                    min={new Date(Date.now() + 10 * 60 * 1000).toISOString().slice(0,16)}
-                    className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
+                  <label className="text-xs text-slate-400 font-medium block mb-2">Horários disponíveis * (mín. 2, máx. 5)</label>
+                  <div className="space-y-2">
+                    {agendarForm.slots.map((s, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <input type="datetime-local" value={s}
+                          onChange={e => setAgendarForm(f => {
+                            const slots = [...f.slots]; slots[i] = e.target.value; return { ...f, slots };
+                          })}
+                          min={new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0,16)}
+                          className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
+                        {agendarForm.slots.length > 1 && (
+                          <button onClick={() => setAgendarForm(f => {
+                            const slots = f.slots.filter((_,j) => j !== i);
+                            return { ...f, slots, qtd_escolha: Math.min(f.qtd_escolha, slots.filter(x=>x).length || 1) };
+                          })} className="text-red-400 hover:text-red-300 text-lg leading-none flex-shrink-0">×</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {agendarForm.slots.length < 5 && (
+                    <button onClick={() => setAgendarForm(f => ({ ...f, slots: [...f.slots, ''] }))}
+                      className="mt-2 text-xs text-slate-400 hover:text-[#ecbf03] transition-colors">
+                      + Adicionar horário
+                    </button>
+                  )}
                 </div>
 
-                {/* Participantes */}
+                {/* Qtd escolha */}
+                {(() => {
+                  const slotsValidos = agendarForm.slots.filter(s => s.trim()).length;
+                  if (slotsValidos < 2) return null;
+                  return (
+                    <div>
+                      <label className="text-xs text-slate-400 font-medium block mb-1">O cliente confirma quantos horários? *</label>
+                      <select value={agendarForm.qtd_escolha}
+                        onChange={e => setAgendarForm(f => ({ ...f, qtd_escolha: Number(e.target.value) }))}
+                        className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200">
+                        {Array.from({ length: slotsValidos }, (_, i) => i + 1).map(n => (
+                          <option key={n} value={n}>{n} horário{n > 1 ? 's' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
+
+                {/* Participantes sugeridos */}
                 <div>
-                  <label className="text-xs text-slate-400 font-medium block mb-1">Participantes</label>
+                  <label className="text-xs text-slate-400 font-medium block mb-1">Participantes sugeridos</label>
                   <div className="flex gap-2 mb-2">
-                    <input value={testeParticipanteInput.nome} placeholder="Nome"
-                      onChange={e => setTesteParticipanteInput(p => ({ ...p, nome: e.target.value }))}
+                    <input value={agendarParticipanteInput.nome} placeholder="Nome"
+                      onChange={e => setAgendarParticipanteInput(p => ({ ...p, nome: e.target.value }))}
                       className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
-                    <input value={testeParticipanteInput.email} placeholder="Email"
-                      onChange={e => setTesteParticipanteInput(p => ({ ...p, email: e.target.value }))}
+                    <input value={agendarParticipanteInput.email} placeholder="Email"
+                      onChange={e => setAgendarParticipanteInput(p => ({ ...p, email: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && agendarParticipanteInput.email) {
+                          setAgendarForm(f => ({ ...f, participantes_sugeridos: [...f.participantes_sugeridos, { ...agendarParticipanteInput }] }));
+                          setAgendarParticipanteInput({ nome: '', email: '' });
+                        }
+                      }}
                       className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
                     <button onClick={() => {
-                      if (!testeParticipanteInput.email) return;
-                      setTesteForm(f => ({ ...f, participantes: [...f.participantes, { ...testeParticipanteInput }] }));
-                      setTesteParticipanteInput({ nome: '', email: '' });
+                      if (!agendarParticipanteInput.email) return;
+                      setAgendarForm(f => ({ ...f, participantes_sugeridos: [...f.participantes_sugeridos, { ...agendarParticipanteInput }] }));
+                      setAgendarParticipanteInput({ nome: '', email: '' });
                     }} className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 rounded-xl transition-colors">+</button>
                   </div>
-                  {testeForm.participantes.map((p, i) => (
+                  {agendarForm.participantes_sugeridos.map((p, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs text-slate-400 mb-1">
                       <span className="flex-1">{p.nome} &lt;{p.email}&gt;</span>
-                      <button onClick={() => setTesteForm(f => ({ ...f, participantes: f.participantes.filter((_,j) => j !== i) }))}
+                      <button onClick={() => setAgendarForm(f => ({ ...f, participantes_sugeridos: f.participantes_sugeridos.filter((_,j) => j !== i) }))}
                         className="text-red-400 hover:text-red-300">×</button>
                     </div>
                   ))}
                 </div>
 
-                <button onClick={handleTesteSubmit} disabled={testeLoading}
+                <button onClick={handleOfertarSubmit} disabled={agendarLoading}
                   className="w-full bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50">
-                  {testeLoading ? 'Criando evento…' : 'Criar evento'}
+                  {agendarLoading ? 'Gerando link…' : 'Gerar link de agendamento'}
                 </button>
               </div>
             )}

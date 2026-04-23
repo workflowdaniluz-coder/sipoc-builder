@@ -4,9 +4,9 @@ const TIPO_LABELS = {
   validacao_bpmn: 'Validação BPMN',
 }
 
-export function gerarTituloReuniao({ clienteNome, tipo, tipoCustomizado, setorNome }) {
-  const tipoLabel = tipo === 'outra' ? tipoCustomizado.trim() : TIPO_LABELS[tipo]
+export function gerarTitulo({ clienteNome, tipo, tipoCustomizado, setorNome }) {
+  const label = tipo === 'outra' ? tipoCustomizado.trim() : TIPO_LABELS[tipo]
   return setorNome
-    ? `[${clienteNome}] ${tipoLabel} - ${setorNome}`
-    : `[${clienteNome}] ${tipoLabel}`
+    ? `[${clienteNome}] ${label} - ${setorNome}`
+    : `[${clienteNome}] ${label}`
 }

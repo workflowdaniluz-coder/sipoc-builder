@@ -1408,14 +1408,14 @@ export async function finalizarRespostaCliente(tokenId, sipocId, respostas) {
 }
 
 // ──────────────────────────────────────────────
-// Reuniões
+// AGENDAMENTO
 // ──────────────────────────────────────────────
 
-export async function criarReuniaoManual(payload) {
+export async function ofertarDisponibilidade(payload) {
   const { data: { session } } = await supabase.auth.getSession()
   if (!session) throw new Error('Não autenticado.')
 
-  const resp = await fetch('/api/reunioes/criar-manual', {
+  const res = await fetch('/api/agendamento/ofertar', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1423,24 +1423,34 @@ export async function criarReuniaoManual(payload) {
     },
     body: JSON.stringify(payload),
   })
-
-  const json = await resp.json()
-  if (!json.ok) throw new Error(json.error ?? 'Erro ao criar reunião.')
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error ?? 'Erro ao ofertar disponibilidade.')
   return json
 }
 
-export async function listarReunioesPorCliente(clienteId) {
-  const { data, error } = await supabase
-    .from('reunioes')
-    .select(`
-      id, tipo, tipo_customizado, titulo, duracao_min, scheduled_at,
-      meet_url, status, criado_em,
-      setores(id, nome),
-      reuniao_sipocs(sipoc_id)
-    `)
-    .eq('cliente_id', clienteId)
-    .order('scheduled_at', { ascending: false })
+export async function cancelarOferta(token) {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Não autenticado.')
 
-  if (error) throw new Error('Erro ao listar reuniões: ' + error.message)
+  const res = await fetch(`/api/agendamento/cancelar?token=${token}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.error ?? 'Erro ao cancelar oferta.')
+  return json
+}
+
+export async function listarTokensAgendamentoPorSetor(setorId) {
+  const { data, error } = await supabase
+    .from('tokens_agendamento')
+    .select('id, token, tipo, tipo_customizado, duracao_min, slots, qtd_escolha, expira_em, usado_em, criado_em')
+    .eq('setor_id', setorId)
+    .is('revogado_em', null)
+    .is('usado_em', null)
+    .gt('expira_em', new Date().toISOString())
+    .order('criado_em', { ascending: false })
+
+  if (error) throw new Error('Erro ao listar ofertas: ' + error.message)
   return data ?? []
 }
