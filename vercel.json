@@ -4,5 +4,8 @@
       "path": "/api/agendamento/limpar-expirados",
       "schedule": "0 8 * * *"
     }
+  ],
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
