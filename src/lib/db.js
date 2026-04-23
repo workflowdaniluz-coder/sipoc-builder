@@ -1335,6 +1335,26 @@ export async function avancarFaseParaRetrabalho(sipocId, consultorId) {
 
 // ──────────────────────────────────────────────
 
+// ──────────────────────────────────────────────
+// GOOGLE CALENDAR AUTH
+// ──────────────────────────────────────────────
+
+/**
+ * Retorna status da conexão Google do consultor.
+ * Nunca expõe refresh_token — apenas email e data.
+ */
+export async function getGoogleAuthStatus(consultorId) {
+  const { data, error } = await supabase
+    .from('consultor_google_auth')
+    .select('google_email, conectado_em, revogado_em')
+    .eq('consultor_id', consultorId)
+    .maybeSingle()
+
+  if (error) throw new Error('Erro ao buscar status Google: ' + error.message)
+  if (!data || data.revogado_em) return { conectado: false, email: null, conectadoEm: null }
+  return { conectado: true, email: data.google_email, conectadoEm: data.conectado_em }
+}
+
 export async function salvarLevantamento(sipocId, levantamentoObj) {
   const { error } = await supabase
     .from('sipocs')

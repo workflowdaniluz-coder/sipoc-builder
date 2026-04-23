@@ -9,6 +9,7 @@ import {
   listarNotificacoes, atualizarStatusNotificacao, contarNotificacoesUnread,
   buscarDetalhesCliente,
   getVinculos, addVinculo, removeVinculo, removeVinculosByChip,
+  getGoogleAuthStatus,
 } from './lib/db';
 import { STATUS_CONFIG } from './lib/constants';
 import CreateProjectModal from './components/CreateProjectModal';
@@ -765,6 +766,64 @@ function App() {
   const [notifModalData, setNotifModalData]     = useState(null); // notif para modal Adicionar SIPOC
   const [notifSectionOpen, setNotifSectionOpen] = useState(true);
 
+  // ── Google Calendar OAuth ──────────────────────
+  const [googleAuth, setGoogleAuth]         = useState(null); // { conectado, email, conectadoEm } | null
+  const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
+
+  const carregarGoogleAuth = async () => {
+    if (!session?.user?.id) return;
+    try {
+      const status = await getGoogleAuthStatus(session.user.id);
+      setGoogleAuth(status);
+    } catch { setGoogleAuth({ conectado: false, email: null, conectadoEm: null }); }
+  };
+
+  useEffect(() => {
+    if (appMode !== 'consultant' || !session?.user?.id) return;
+    carregarGoogleAuth();
+    const params = new URLSearchParams(window.location.search);
+    const gc = params.get('google_connected');
+    if (gc) {
+      window.history.replaceState({}, '', window.location.pathname);
+      if (gc === 'success') alert('Google Calendar conectado com sucesso!');
+      else {
+        const reason = params.get('reason') ?? 'erro desconhecido';
+        alert(`Erro ao conectar Google Calendar: ${reason}`);
+      }
+    }
+  }, [appMode, session?.user?.id]);
+
+  const handleConectarGoogle = async () => {
+    setGoogleAuthLoading(true);
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      const resp = await fetch('/api/auth/google/start', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${s.access_token}` },
+      });
+      const json = await resp.json();
+      if (json.ok) window.location.href = json.authUrl;
+      else alert('Erro ao iniciar conexão: ' + (json.error ?? 'tente novamente'));
+    } catch { alert('Erro ao iniciar conexão com o Google.'); }
+    finally { setGoogleAuthLoading(false); }
+  };
+
+  const handleDesconectarGoogle = async () => {
+    if (!window.confirm('Desconectar sua conta Google Calendar?')) return;
+    setGoogleAuthLoading(true);
+    try {
+      const { data: { session: s } } = await supabase.auth.getSession();
+      const resp = await fetch('/api/auth/google/disconnect', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${s.access_token}` },
+      });
+      const json = await resp.json();
+      if (json.ok) await carregarGoogleAuth();
+      else alert('Erro ao desconectar: ' + (json.error ?? 'tente novamente'));
+    } catch { alert('Erro ao desconectar Google.'); }
+    finally { setGoogleAuthLoading(false); }
+  };
+
   const carregarProjetos = async () => {
     setIsLoadingProjects(true);
     try {
@@ -1278,6 +1337,77 @@ function App() {
               </div>
             )}
           </section>
+
+          {/* ── Google Calendar ── */}
+          {(() => {
+            const isProd = window.location.hostname === 'app.p-excellence.com.br';
+            if (!isProd) {
+              return (
+                <section className="mt-8 rounded-2xl border border-slate-700/50 bg-slate-800/30 p-5 opacity-50">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">📅</span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-400">Google Calendar</p>
+                      <p className="text-xs text-slate-500">OAuth disponível apenas em produção</p>
+                    </div>
+                  </div>
+                </section>
+              );
+            }
+            if (!googleAuth) {
+              return (
+                <section className="mt-8 rounded-2xl border border-slate-700/50 bg-slate-800/30 p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">📅</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-slate-300">Google Calendar</p>
+                      <p className="text-xs text-slate-500">Carregando…</p>
+                    </div>
+                  </div>
+                </section>
+              );
+            }
+            if (googleAuth.conectado) {
+              return (
+                <section className="mt-8 rounded-2xl border border-emerald-800/40 bg-emerald-900/10 p-5">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">📅</span>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span>
+                        <p className="text-sm font-semibold text-emerald-300">Google Calendar conectado</p>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">{googleAuth.email}</p>
+                    </div>
+                    <button
+                      onClick={handleDesconectarGoogle}
+                      disabled={googleAuthLoading}
+                      className="text-xs text-slate-400 hover:text-red-400 font-medium transition-colors disabled:opacity-50">
+                      {googleAuthLoading ? 'Aguarde…' : 'Desconectar'}
+                    </button>
+                  </div>
+                </section>
+              );
+            }
+            return (
+              <section className="mt-8 rounded-2xl border border-slate-700/50 bg-slate-800/30 p-5">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">📅</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-slate-300">Google Calendar</p>
+                    <p className="text-xs text-slate-500">Conecte para agendar reuniões diretamente</p>
+                  </div>
+                  <button
+                    onClick={handleConectarGoogle}
+                    disabled={googleAuthLoading}
+                    className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-4 py-2 rounded-xl font-bold
+                               text-xs transition-all shadow-sm shadow-[#ecbf03]/30 disabled:opacity-50">
+                    {googleAuthLoading ? 'Aguarde…' : 'Conectar'}
+                  </button>
+                </div>
+              </section>
+            );
+          })()}
         </main>
       )}
 
