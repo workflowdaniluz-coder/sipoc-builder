@@ -10,6 +10,7 @@ import {
   buscarDetalhesCliente,
   getVinculos, addVinculo, removeVinculo, removeVinculosByChip,
   getGoogleAuthStatus,
+  criarReuniaoManual,
 } from './lib/db';
 import { STATUS_CONFIG } from './lib/constants';
 import CreateProjectModal from './components/CreateProjectModal';
@@ -824,6 +825,51 @@ function App() {
     finally { setGoogleAuthLoading(false); }
   };
 
+  // ── Modal de teste de evento Google Calendar ──
+  // TODO: Substituir pelo modal de agendamento real na camada 4
+  const [testeModalOpen, setTesteModalOpen]     = useState(false);
+  const [testeForm, setTesteForm]               = useState({
+    cliente_id: '', setor_id: '', tipo: 'sipoc', tipo_customizado: '',
+    duracao_min: 60, scheduled_at: '', participantes: [],
+  });
+  const [testeParticipanteInput, setTesteParticipanteInput] = useState({ nome: '', email: '' });
+  const [testeSetores, setTesteSetores]         = useState([]);
+  const [testeLoading, setTesteLoading]         = useState(false);
+  const [testeResultado, setTesteResultado]     = useState(null); // { titulo, meet_url, htmlLink }
+
+  const handleTesteClienteChange = async (clienteId) => {
+    setTesteForm(f => ({ ...f, cliente_id: clienteId, setor_id: '' }));
+    if (!clienteId) { setTesteSetores([]); return; }
+    const { data } = await supabase.from('setores').select('id, nome').eq('cliente_id', clienteId).order('nome');
+    setTesteSetores(data ?? []);
+  };
+
+  const handleTesteSubmit = async () => {
+    if (!testeForm.cliente_id) return alert('Selecione um cliente.');
+    if (!testeForm.scheduled_at) return alert('Informe data e hora.');
+    if (testeForm.tipo === 'outra' && !testeForm.tipo_customizado.trim()) return alert('Informe o tipo customizado.');
+    const minDate = new Date(Date.now() + 10 * 60 * 1000);
+    if (new Date(testeForm.scheduled_at) < minDate) return alert('Horário deve ser pelo menos 10 minutos no futuro.');
+
+    setTesteLoading(true);
+    try {
+      const result = await criarReuniaoManual({
+        cliente_id: testeForm.cliente_id,
+        setor_id: testeForm.setor_id || null,
+        tipo: testeForm.tipo,
+        tipo_customizado: testeForm.tipo === 'outra' ? testeForm.tipo_customizado.trim() : null,
+        duracao_min: Number(testeForm.duracao_min),
+        scheduled_at: new Date(testeForm.scheduled_at).toISOString(),
+        participantes: testeForm.participantes,
+      });
+      setTesteResultado(result);
+    } catch (err) {
+      alert('Erro: ' + err.message);
+    } finally {
+      setTesteLoading(false);
+    }
+  };
+
   const carregarProjetos = async () => {
     setIsLoadingProjects(true);
     try {
@@ -901,14 +947,24 @@ function App() {
     finally { setIsLoadingDetalhes(false); }
   };
 
+  const [activeSetor, setActiveSetor] = useState(null);
+
   const selecionarProjeto = async (proj) => {
     setActiveProject(proj);
+    setActiveSetor(null);
     setView('project');
     carregarDetalhes(proj.id);
   };
 
-  const abrirFerramentas = async (proj) => {
-    setActiveProject(proj); setView('builder');
+  const selecionarSetor = (setor) => {
+    setActiveSetor(setor);
+    setView('setor');
+  };
+
+  const abrirFerramentas = async (proj, setor = null) => {
+    setActiveProject(proj);
+    setActiveSetor(setor);
+    setView('builder');
     setSyncStatus({}); setActiveTab('sipoc'); setIsLoadingProcesses(true);
     setNotifications([]); setNotifSectionOpen(true);
     carregarNotificacoes(proj.id);
@@ -1191,10 +1247,18 @@ function App() {
                 ← Dashboard
               </button>
             )}
-            {view === 'builder' && (
+            {view === 'setor' && (
               <button onClick={() => { setView('project'); carregarDetalhes(activeProject.id); }}
                 className="text-xs text-slate-400 hover:text-white transition-colors font-medium flex items-center gap-1">
                 ← {activeProject?.empresa}
+              </button>
+            )}
+            {view === 'builder' && (
+              <button onClick={() => {
+                if (activeSetor) { setView('setor'); }
+                else { setView('project'); carregarDetalhes(activeProject.id); }
+              }} className="text-xs text-slate-400 hover:text-white transition-colors font-medium flex items-center gap-1">
+                ← {activeSetor ? activeSetor.nome : activeProject?.empresa}
               </button>
             )}
             {view === 'builder' && (
@@ -1222,10 +1286,133 @@ function App() {
           projeto={projetoDetalhes}
           isLoading={isLoadingDetalhes}
           onBack={() => setView('dashboard')}
-          onOpenTools={() => abrirFerramentas(activeProject)}
+          onSelecionarSetor={selecionarSetor}
           onRefresh={() => carregarDetalhes(activeProject.id)}
         />
       )}
+
+      {/* ══ SETOR ══ */}
+      {view === 'setor' && activeSetor && (() => {
+        const sipocs      = activeSetor.sipocs ?? []
+        const total       = sipocs.length
+        const realizados  = sipocs.filter(s => s.status === 'em_revisao' || s.status === 'aprovado').length
+        const rascunhos   = sipocs.filter(s => s.status === 'rascunho').length
+        const comBpmn     = sipocs.filter(s => s.bpmnStatus).length
+        const bpmnDone    = sipocs.filter(s => s.bpmnStatus === 'aprovado').length
+        const pct         = total > 0 ? Math.round((realizados / total) * 100) : 0
+
+        return (
+          <main className="max-w-screen-md mx-auto w-full px-6 py-10 flex-1">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <p className="text-xs text-slate-400 mb-1">{activeProject?.empresa}</p>
+                <h2 className="text-2xl font-black text-slate-800">{activeSetor.nome}</h2>
+                {activeSetor.responsavel && (
+                  <p className="text-sm text-slate-400 mt-0.5">Responsável: {activeSetor.responsavel}</p>
+                )}
+              </div>
+              <button
+                onClick={() => abrirFerramentas(activeProject, activeSetor)}
+                className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-6 py-2.5 rounded-xl
+                           font-bold text-sm transition-all shadow-sm shadow-[#ecbf03]/30 flex items-center gap-2">
+                Abrir ferramentas
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+              {[
+                { label: 'Mapeamentos', value: total, sub: 'total' },
+                { label: 'Realizados', value: realizados, sub: `${pct}% concluído`, color: realizados > 0 ? 'text-emerald-500' : null },
+                { label: 'Rascunhos', value: rascunhos, sub: 'em andamento', color: rascunhos > 0 ? 'text-amber-500' : null },
+                { label: 'BPMN', value: comBpmn, sub: bpmnDone > 0 ? `${bpmnDone} aprovado${bpmnDone > 1 ? 's' : ''}` : 'mapeamentos com BPMN', color: comBpmn > 0 ? 'text-blue-400' : null },
+              ].map(({ label, value, sub, color }) => (
+                <div key={label} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+                  <p className={`text-3xl font-black ${color ?? 'text-slate-700'}`}>{value}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{sub}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Barra de progresso */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-bold text-slate-500">Progresso geral</p>
+                <p className="text-xs font-bold text-slate-700">{pct}%</p>
+              </div>
+              <div className="w-full bg-slate-100 rounded-full h-2">
+                <div className="bg-[#ecbf03] h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+
+            {/* Lista de processos */}
+            {total > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Processos</p>
+                <div className="divide-y divide-slate-100">
+                  {sipocs.map(s => (
+                    <div key={s.id} className="py-2.5 flex items-center gap-3">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                        s.status === 'aprovado' ? 'bg-emerald-400' :
+                        s.status === 'em_revisao' ? 'bg-amber-400' : 'bg-slate-300'
+                      }`} />
+                      <p className="flex-1 text-sm text-slate-700">{s.nomeProcesso || '—'}</p>
+                      {s.bpmnStatus && (
+                        <span className="text-[10px] font-semibold text-blue-400 bg-blue-50 px-2 py-0.5 rounded-full">
+                          BPMN
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Reuniões */}
+            {(() => {
+              const isProd = window.location.hostname === 'app.p-excellence.com.br';
+              if (!isProd) return null;
+              return (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Reuniões</p>
+                    {googleAuth?.conectado && (
+                      /* TODO: Substituir pelo modal de agendamento real na camada 4 */
+                      <button
+                        onClick={() => {
+                          setTesteResultado(null);
+                          setTesteForm({
+                            cliente_id: activeProject.id,
+                            setor_id: activeSetor.id,
+                            tipo: 'sipoc', tipo_customizado: '',
+                            duracao_min: 60, scheduled_at: '', participantes: [],
+                          });
+                          setTesteSetores([{ id: activeSetor.id, nome: activeSetor.nome }]);
+                          setTesteModalOpen(true);
+                        }}
+                        className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-3 py-1.5 rounded-xl font-bold text-xs transition-all shadow-sm">
+                        + Agendar reunião
+                      </button>
+                    )}
+                  </div>
+                  {!googleAuth?.conectado ? (
+                    <p className="text-sm text-slate-400 text-center py-4">
+                      Conecte o Google Calendar no painel principal para agendar reuniões.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-400 text-center py-4">Nenhuma reunião agendada ainda.</p>
+                  )}
+                </div>
+              );
+            })()}
+          </main>
+        )
+      })()}
 
       {/* ══ DASHBOARD ══ */}
       {view === 'dashboard' && (
@@ -1534,7 +1721,8 @@ function App() {
                   <p className="text-xs text-slate-400 text-center py-6">Carregando…</p>
                 ) : (
                   Object.entries(processosPorSetor)
-                  .filter(([, procs]) => {
+                  .filter(([setorNome, procs]) => {
+                    if (activeSetor && setorNome !== activeSetor.nome) return false;
                     if (!filtroResponsavel) return true;
                     const sid = procs[0]?.setor_id;
                     return sid && setorResponsavel[sid] === filtroResponsavel;
@@ -1545,7 +1733,7 @@ function App() {
                     return (
                     <div key={setor}>
                       <div className="px-2 mb-1.5">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{setor}</p>
+                        {!activeSetor && <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{setor}</p>}
                         {setorId && (
                           <div className="mt-1.5 relative">
                             {/* Chip quando selecionado / botão vazio */}
@@ -1715,10 +1903,10 @@ function App() {
             {/* Tabs */}
             <div className="flex gap-1.5 mb-5">
               {[
-                { id: 'sipoc',  label: 'Mapeamento SIPOC' },
-                { id: 'rasci',  label: 'Matriz RASCI' },
-                { id: 'bpmn',   label: 'BPMN' },
-                { id: 'tokens', label: 'Acessos' },
+                { id: 'sipoc',    label: 'Mapeamento SIPOC' },
+                { id: 'rasci',    label: 'Matriz RASCI' },
+                { id: 'bpmn',     label: 'BPMN' },
+                { id: 'tokens',   label: 'Acessos' },
               ].map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                   className={`px-5 py-2.5 rounded-xl font-semibold text-sm transition-all
@@ -2123,6 +2311,140 @@ function App() {
       )}
 
       {/* ── Modal: Criar Projeto ── */}
+      {/* ── Modal: Evento de teste Google Calendar ── */}
+      {/* TODO: Substituir pelo modal de agendamento real na camada 4 */}
+      {testeModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setTesteModalOpen(false); }}>
+          <div className="bg-[#1a2f4e] border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-white text-base">Criar evento de teste</h3>
+              <button onClick={() => setTesteModalOpen(false)} className="text-slate-400 hover:text-white text-xl leading-none">×</button>
+            </div>
+
+            {testeResultado ? (
+              <div className="space-y-4">
+                <div className="bg-emerald-900/30 border border-emerald-700/40 rounded-xl p-4">
+                  <p className="text-emerald-300 font-semibold text-sm mb-1">Evento criado!</p>
+                  <p className="text-slate-300 text-xs mb-3">{testeResultado.titulo}</p>
+                  {testeResultado.meet_url && (
+                    <div className="mb-2">
+                      <p className="text-xs text-slate-400 mb-1">Link do Meet:</p>
+                      <div className="flex items-center gap-2">
+                        <input readOnly value={testeResultado.meet_url}
+                          className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono" />
+                        <button onClick={() => { navigator.clipboard.writeText(testeResultado.meet_url); alert('Copiado!'); }}
+                          className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition-colors">
+                          Copiar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setTesteModalOpen(false)}
+                  className="w-full bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] py-2 rounded-xl font-bold text-sm transition-all">
+                  Fechar
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Cliente */}
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-1">Cliente *</label>
+                  <select value={testeForm.cliente_id} onChange={e => handleTesteClienteChange(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200">
+                    <option value="">Selecione…</option>
+                    {projetos.map(p => <option key={p.id} value={p.id}>{p.empresa}</option>)}
+                  </select>
+                </div>
+
+                {/* Setor */}
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-1">Setor</label>
+                  <select value={testeForm.setor_id} onChange={e => setTesteForm(f => ({ ...f, setor_id: e.target.value }))}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200"
+                    disabled={!testeSetores.length}>
+                    <option value="">Nenhum</option>
+                    {testeSetores.map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                  </select>
+                </div>
+
+                {/* Tipo */}
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-2">Tipo *</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[['sipoc','SIPOC'],['bpmn','BPMN'],['validacao_bpmn','Validação BPMN'],['outra','Outra']].map(([v,l]) => (
+                      <button key={v} onClick={() => setTesteForm(f => ({ ...f, tipo: v, tipo_customizado: '' }))}
+                        className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors ${testeForm.tipo === v ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                  {testeForm.tipo === 'outra' && (
+                    <input value={testeForm.tipo_customizado}
+                      onChange={e => setTesteForm(f => ({ ...f, tipo_customizado: e.target.value }))}
+                      placeholder="Descreva o tipo…"
+                      className="mt-2 w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
+                  )}
+                </div>
+
+                {/* Duração */}
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-2">Duração *</label>
+                  <div className="flex gap-2">
+                    {[[60,'60 min'],[120,'120 min']].map(([v,l]) => (
+                      <button key={v} onClick={() => setTesteForm(f => ({ ...f, duracao_min: v }))}
+                        className={`text-xs px-4 py-1.5 rounded-lg border font-medium transition-colors ${testeForm.duracao_min === v ? 'bg-[#ecbf03] border-[#ecbf03] text-[#16253e]' : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'}`}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Data/hora */}
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-1">Data e hora *</label>
+                  <input type="datetime-local" value={testeForm.scheduled_at}
+                    onChange={e => setTesteForm(f => ({ ...f, scheduled_at: e.target.value }))}
+                    min={new Date(Date.now() + 10 * 60 * 1000).toISOString().slice(0,16)}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
+                </div>
+
+                {/* Participantes */}
+                <div>
+                  <label className="text-xs text-slate-400 font-medium block mb-1">Participantes</label>
+                  <div className="flex gap-2 mb-2">
+                    <input value={testeParticipanteInput.nome} placeholder="Nome"
+                      onChange={e => setTesteParticipanteInput(p => ({ ...p, nome: e.target.value }))}
+                      className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
+                    <input value={testeParticipanteInput.email} placeholder="Email"
+                      onChange={e => setTesteParticipanteInput(p => ({ ...p, email: e.target.value }))}
+                      className="flex-1 bg-slate-800 border border-slate-600 rounded-xl px-3 py-2 text-sm text-slate-200" />
+                    <button onClick={() => {
+                      if (!testeParticipanteInput.email) return;
+                      setTesteForm(f => ({ ...f, participantes: [...f.participantes, { ...testeParticipanteInput }] }));
+                      setTesteParticipanteInput({ nome: '', email: '' });
+                    }} className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 rounded-xl transition-colors">+</button>
+                  </div>
+                  {testeForm.participantes.map((p, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs text-slate-400 mb-1">
+                      <span className="flex-1">{p.nome} &lt;{p.email}&gt;</span>
+                      <button onClick={() => setTesteForm(f => ({ ...f, participantes: f.participantes.filter((_,j) => j !== i) }))}
+                        className="text-red-400 hover:text-red-300">×</button>
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={handleTesteSubmit} disabled={testeLoading}
+                  className="w-full bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50">
+                  {testeLoading ? 'Criando evento…' : 'Criar evento'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {criarProjetoModal && (
         <CreateProjectModal
           onClose={() => setCriarProjetoModal(false)}

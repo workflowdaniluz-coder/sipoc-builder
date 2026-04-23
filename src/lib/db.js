@@ -107,7 +107,7 @@ export async function buscarDetalhesCliente(clienteId) {
         token_formulario, monday_board_id, monday_folder_id,
         setores (
           id, nome, responsavel,
-          sipocs ( id, status ),
+          sipocs ( id, status, nome_processo, bpmn_status, bpmn_fase_atual ),
           tokens_acesso ( usado_em )
         )
       `)
@@ -165,6 +165,18 @@ export async function buscarDetalhesCliente(clienteId) {
     totalSipocs:           allSipocs.length,
     mapeamentosRealizados: allSipocs.filter(s => s.status === 'em_revisao').length,
     ultimoAcessoCliente:   ultimoAcesso,
+    setores: setores.map(s => ({
+      id:          s.id,
+      nome:        s.nome,
+      responsavel: s.responsavel,
+      sipocs:      (s.sipocs ?? []).map(sp => ({
+        id:            sp.id,
+        status:        sp.status,
+        nomeProcesso:  sp.nome_processo,
+        bpmnStatus:    sp.bpmn_status,
+        bpmnFaseAtual: sp.bpmn_fase_atual,
+      })),
+    })),
   }
 }
 
@@ -1393,4 +1405,42 @@ export async function finalizarRespostaCliente(tokenId, sipocId, respostas) {
       usado_em: new Date().toISOString(),
     })
     .eq('id', tokenId)
+}
+
+// ──────────────────────────────────────────────
+// Reuniões
+// ──────────────────────────────────────────────
+
+export async function criarReuniaoManual(payload) {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) throw new Error('Não autenticado.')
+
+  const resp = await fetch('/api/reunioes/criar-manual', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const json = await resp.json()
+  if (!json.ok) throw new Error(json.error ?? 'Erro ao criar reunião.')
+  return json
+}
+
+export async function listarReunioesPorCliente(clienteId) {
+  const { data, error } = await supabase
+    .from('reunioes')
+    .select(`
+      id, tipo, tipo_customizado, titulo, duracao_min, scheduled_at,
+      meet_url, status, criado_em,
+      setores(id, nome),
+      reuniao_sipocs(sipoc_id)
+    `)
+    .eq('cliente_id', clienteId)
+    .order('scheduled_at', { ascending: false })
+
+  if (error) throw new Error('Erro ao listar reuniões: ' + error.message)
+  return data ?? []
 }

@@ -74,7 +74,7 @@ function InfoRow({ label, value }) {
 
 // ── Componente principal ──────────────────────────────────────────
 
-export default function ProjectView({ projeto, isLoading, onBack, onOpenTools, onRefresh }) {
+export default function ProjectView({ projeto, isLoading, onBack, onSelecionarSetor, onRefresh }) {
   const [statusDropdown, setStatusDropdown] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [drawerOpen,     setDrawerOpen]     = useState(false)
@@ -392,16 +392,49 @@ export default function ProjectView({ projeto, isLoading, onBack, onOpenTools, o
         </div>
       </div>
 
-      {/* CTA */}
-      <div className="flex justify-end pb-4">
-        <button onClick={onOpenTools}
-          className="bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] px-8 py-3 rounded-xl
-                     font-bold text-sm transition-all shadow-sm shadow-[#ecbf03]/30 flex items-center gap-2">
-          Abrir ferramentas
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
-          </svg>
-        </button>
+      {/* Setores */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Setores</p>
+        {(!projeto.setores || projeto.setores.length === 0) ? (
+          <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center">
+            <p className="text-sm text-slate-400">Nenhum setor cadastrado.</p>
+            <p className="text-xs text-slate-400 mt-1">Abra as ferramentas de um setor para começar.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {projeto.setores.map(setor => {
+              const total     = setor.sipocs.length
+              const realizados = setor.sipocs.filter(s => s.status === 'em_revisao' || s.status === 'aprovado').length
+              const comBpmn   = setor.sipocs.filter(s => s.bpmnStatus).length
+              const pct       = total > 0 ? Math.round((realizados / total) * 100) : 0
+              return (
+                <button key={setor.id} onClick={() => onSelecionarSetor(setor)}
+                  className="text-left p-4 rounded-xl border border-slate-200 hover:border-[#ecbf03]/60
+                             hover:bg-[#ecbf03]/5 transition-all group">
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <p className="font-bold text-slate-700 text-sm group-hover:text-[#16253e]">{setor.nome}</p>
+                    {setor.responsavel && (
+                      <span className="text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full flex-shrink-0">
+                        {setor.responsavel.split(' ')[0]}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="flex-1 bg-slate-100 rounded-full h-1.5">
+                      <div className="bg-[#ecbf03] h-1.5 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="text-xs font-bold text-slate-500">{pct}%</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] text-slate-400">
+                    <span>{total} mapeamento{total !== 1 ? 's' : ''}</span>
+                    {realizados > 0 && <span className="text-emerald-500">{realizados} realizado{realizados !== 1 ? 's' : ''}</span>}
+                    {comBpmn > 0 && <span className="text-blue-400">{comBpmn} BPMN</span>}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {drawerOpen && (
