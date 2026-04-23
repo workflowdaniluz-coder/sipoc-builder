@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { converterParaEmbedUrl } from './utils'
 
 // ──────────────────────────────────────────────
 // Helpers de conversão de escala
@@ -25,6 +26,7 @@ function parsePadronizacao(text) {
 // ──────────────────────────────────────────────
 
 export async function listarProjetos() {
+  // Campos mínimos para calcular progresso no dashboard — evita payload excessivo
   const { data, error } = await supabase
     .from('clientes')
     .select(`
@@ -37,9 +39,9 @@ export async function listarProjetos() {
           id, status,
           nome_processo,
           suppliers, inputs, outputs, customers,
-          tipo, impacto, maturidade, esforco,
-          periodicidade, tecnologia, padronizacao,
-          ferramentas, rasci_r,
+          tipo, impacto,
+          padronizacao,
+          rasci_r,
           respostas_cliente
         )
       )
@@ -61,14 +63,11 @@ export async function listarProjetos() {
         customers:          sipoc.customers ?? [],
         tipo:               sipoc.tipo ?? '',
         impacto:            intToLevel(sipoc.impacto),
-        maturidade:         intToLevel(sipoc.maturidade),
-        esforco:            intToLevel(sipoc.esforco),
-        periodicidade:      sipoc.periodicidade ?? '',
-        tecnologia:         sipoc.tecnologia ?? '',
+        // maturidade/esforco/periodicidade/tecnologia/ferramentas não são
+        // usados no cálculo de progresso — omitidos da query do dashboard
         inputsPadronizados: pad.inputsPadronizados ?? '',
         outputsPadronizados:pad.outputsPadronizados ?? '',
         geridoDados:        pad.geridoDados ?? '',
-        ferramentas:        sipoc.ferramentas ?? [],
         rasci:              { r: sipoc.rasci_r ?? [] },
         respostas_cliente:  sipoc.respostas_cliente ?? {},
       })
@@ -1155,15 +1154,7 @@ export async function removeVinculosByChip(sipocId, tipos, chipValor) {
 
 // ── BPMN Validação por Setor ──────────────────────────────────────────────────
 
-/**
- * Converte URL do Google Drive para embed preview.
- */
-export function converterParaEmbedUrl(driveUrl) {
-  if (!driveUrl) return null
-  const m = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/)
-  if (!m) return null
-  return `https://drive.google.com/file/d/${m[1]}/preview`
-}
+export { converterParaEmbedUrl } from './utils'
 
 /**
  * Gera token de validação BPMN por setor (tokens_acesso, tipo='validacao_bpmn').

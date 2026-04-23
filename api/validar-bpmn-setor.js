@@ -87,21 +87,25 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'acao deve ser "aprovado" ou "contestado"' })
       if (r.acao === 'contestado' && !r.comentario?.trim())
         return res.status(400).json({ ok: false, error: 'comentario é obrigatório ao contestar' })
+      if (r.comentario && r.comentario.length > 5000)
+        return res.status(400).json({ ok: false, error: 'Comentário muito longo (máx 5000 caracteres).' })
     }
 
-    // Validar token
+    // Revogar token atomicamente antes de processar — evita race condition de duplo envio
+    const now = new Date().toISOString()
     const { data: tokenData, error: tokenError } = await supabase
       .from('tokens_acesso')
-      .select('id, setor_id, setor_nome, cliente_nome, usado_em')
+      .update({ usado_em: now })
       .eq('token', token)
       .eq('tipo', 'validacao_bpmn')
       .is('revogado_em', null)
-      .gt('expira_em', new Date().toISOString())
+      .is('usado_em', null)
+      .gt('expira_em', now)
+      .select('id, setor_id, setor_nome, cliente_nome')
       .maybeSingle()
 
     if (tokenError) return res.status(500).json({ ok: false, error: 'Erro ao validar token: ' + tokenError.message })
-    if (!tokenData) return res.status(404).json({ ok: false, error: 'Token inválido ou expirado.' })
-    if (tokenData.usado_em) return res.status(409).json({ ok: false, error: 'Este link já foi utilizado.' })
+    if (!tokenData) return res.status(409).json({ ok: false, error: 'Token inválido, expirado ou já utilizado.' })
 
     // Validar que todos os sipoc_ids pertencem ao setor do token (previne IDOR)
     const sipocIds = respostas.map(r => r.sipoc_id)
@@ -117,8 +121,6 @@ export default async function handler(req, res) {
     const idInvalido = sipocIds.find(id => !idsValidos.has(id))
     if (idInvalido) return res.status(403).json({ ok: false, error: 'Processo não pertence ao setor deste token.' })
 
-    const now = new Date().toISOString()
-
     const { data: setorData } = await supabase
       .from('setores')
       .select('clientes ( id, nome )')
@@ -127,17 +129,18 @@ export default async function handler(req, res) {
 
     const projectId = setorData?.clientes?.id
 
-    // Processar cada resposta
+    // Processar cada resposta — falha rápido para evitar estado inconsistente
     for (const r of respostas) {
-      await supabase.from('bpmn_validacao_cliente').insert({
+      const { error: insertErr } = await supabase.from('bpmn_validacao_cliente').insert({
         sipoc_id:        r.sipoc_id,
         token_acesso_id: tokenData.id,
         acao:            r.acao,
         comentario:      r.comentario?.trim() ?? null,
       })
+      if (insertErr) return res.status(500).json({ ok: false, error: `Erro ao registrar resposta do processo ${r.sipoc_id}: ${insertErr.message}` })
 
       if (r.acao === 'aprovado') {
-        await supabase
+        const { error: sipocErr } = await supabase
           .from('sipocs')
           .update({
             bpmn_fase_atual:           'concluido',
@@ -147,6 +150,7 @@ export default async function handler(req, res) {
             bpmn_validacao_comentario: comentarioGeral?.trim() ?? null,
           })
           .eq('id', r.sipoc_id)
+        if (sipocErr) return res.status(500).json({ ok: false, error: `Erro ao atualizar processo ${r.sipoc_id}: ${sipocErr.message}` })
 
         // Fechar fase validacao ativa
         const { data: faseAberta } = await supabase
@@ -179,12 +183,6 @@ export default async function handler(req, res) {
       }
       // contestado: aguarda decisão do consultor
     }
-
-    // Marcar token como usado
-    await supabase
-      .from('tokens_acesso')
-      .update({ usado_em: now })
-      .eq('id', tokenData.id)
 
     // Criar notificação
     if (projectId) {

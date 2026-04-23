@@ -102,10 +102,12 @@ export default function CreateProjectModal({ onClose, onCreated }) {
           .then(d => {
             if (d.ok && d.boardId) {
               atualizarCliente(p.id, { mondayBoardId: d.boardId, mondayFolderId: d.folderId })
-                .catch(() => {})
+                .catch(err => console.error('[monday] Erro ao salvar IDs no projeto:', err))
+            } else if (!d.ok) {
+              console.error('[monday] Erro ao criar pasta:', d.error)
             }
           })
-          .catch(() => {})
+          .catch(err => console.error('[monday] Erro de rede ao criar pasta:', err))
       })
 
       onCreated(p)

@@ -57,6 +57,13 @@ export default async function handler(req, res) {
     if (tokenError) return res.status(500).json({ ok: false, error: 'Erro ao validar token.' })
     if (!cliente) return res.status(403).json({ ok: false, error: 'Token inválido para este cliente.' })
 
+    const emailTrimmed = email?.trim() || null
+    if (emailTrimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed)) {
+      return res.status(400).json({ ok: false, error: 'Email inválido.' })
+    }
+
+    if (nome.length > 200) return res.status(400).json({ ok: false, error: 'Nome muito longo (máx 200 caracteres).' })
+
     const { error } = await supabase
       .from('projeto_contatos')
       .insert({
@@ -65,7 +72,7 @@ export default async function handler(req, res) {
         setor:         setor?.trim() || null,
         cargo:         cargo?.trim() || null,
         gestao_direta: gestaoDireta?.trim() || null,
-        email:         email?.trim() || null,
+        email:         emailTrimmed,
       })
 
     if (error) return res.status(500).json({ ok: false, error: error.message })

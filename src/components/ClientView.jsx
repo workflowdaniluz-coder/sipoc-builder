@@ -25,11 +25,15 @@ function buildEmptyResposta(processo) {
   };
 }
 
+const DRAFT_VERSION = 2
+
 function loadDraft(sipocId) {
   try {
     const raw = localStorage.getItem(`sipoc_draft_${sipocId}`);
     if (!raw) return null;
-    return JSON.parse(raw).data;
+    const parsed = JSON.parse(raw);
+    if (parsed.version !== DRAFT_VERSION) return null;
+    return parsed.data;
   } catch { return null; }
 }
 
@@ -242,6 +246,7 @@ export default function ClientView({ clientData }) {
     draftTimersRef.current[sipocId] = setTimeout(() => {
       try {
         localStorage.setItem(`sipoc_draft_${sipocId}`, JSON.stringify({
+          version: DRAFT_VERSION,
           data,
           savedAt: new Date().toISOString(),
         }));

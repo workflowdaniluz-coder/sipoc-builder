@@ -6,6 +6,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { converterParaEmbedUrl } from './_utils.js'
 
 function getAdminClient() {
   const url = process.env.SUPABASE_URL
@@ -20,13 +21,6 @@ async function verificarAuth(req, supabase) {
   if (!jwt) return null
   const { data: { user } } = await supabase.auth.getUser(jwt)
   return user ?? null
-}
-
-function converterParaEmbedUrl(driveUrl) {
-  if (!driveUrl) return null
-  const m = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/)
-  if (!m) return null
-  return `https://drive.google.com/file/d/${m[1]}/preview`
 }
 
 export default async function handler(req, res) {
