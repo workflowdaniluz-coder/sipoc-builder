@@ -1,7 +1,4 @@
 {
-  "rewrites": [
-    { "source": "/agendar/:token", "destination": "/index.html" }
-  ],
   "crons": [
     {
       "path": "/api/agendamento/limpar-expirados",
