@@ -11,7 +11,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const ORIGIN = process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-const GEMINI_MODEL = 'gemini-2.0-flash'
+const GEMINI_MODEL = 'gemini-2.5-flash'
 
 function getSupabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -352,7 +352,7 @@ async function handlePost(req, res) {
     respostaBruta = await chamarGemini(systemPrompt, historico)
   } catch (err) {
     console.error('[levantamento-chat] Gemini error:', err.message)
-    return res.status(500).json({ ok: false, error: err.message })
+    return res.status(500).json({ ok: false, error: 'Erro ao chamar o assistente. Tente novamente.' })
   }
 
   // 4. Detecta conclusão
