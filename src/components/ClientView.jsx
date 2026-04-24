@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { listarSipocs, salvarRespostaCliente, finalizarRespostaCliente, salvarLevantamento } from '../lib/db';
-import LevantamentoForm from './LevantamentoForm';
+import { listarSipocs, salvarRespostaCliente, finalizarRespostaCliente } from '../lib/db';
+import LevantamentoChat from './LevantamentoChat';
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -219,7 +219,7 @@ function validarFormularioCliente(respostas, processo) {
 // ── Main component ────────────────────────────────────────────────
 
 export default function ClientView({ clientData }) {
-  const { tokenId, setorId, setorNome, clienteNome } = clientData;
+  const { tokenId, token, setorId, setorNome, clienteNome } = clientData;
 
   const [processos, setProcessos]             = useState([]);
   const [activeProcessoId, setActiveProcessoId] = useState(null);
@@ -238,7 +238,6 @@ export default function ClientView({ clientData }) {
   const [tentouFinalizar, setTentouFinalizar] = useState(false);
   const [showThanks, setShowThanks]           = useState(false);
 
-  const levantamentoRef = useRef(null);
   const draftTimersRef = useRef({});
 
   const persistDraft = useCallback((sipocId, data) => {
@@ -414,16 +413,11 @@ export default function ClientView({ clientData }) {
     setTentouFinalizar(true);
     if (!activeProcessoId) return;
     const v = validarFormularioCliente(respostas[activeProcessoId], activeProcesso);
-    const levOk = levantamentoRef.current?.validate() ?? true;
-    if (!v.valido || !levOk) return;
+    if (!v.valido) return;
     setIsFinalizando(true);
     setFinalizarError('');
     try {
-      const levData = levantamentoRef.current?.getValue();
-      await Promise.all([
-        finalizarRespostaCliente(tokenId, activeProcessoId, respostas[activeProcessoId]),
-        levData ? salvarLevantamento(activeProcessoId, levData) : Promise.resolve(),
-      ]);
+      await finalizarRespostaCliente(tokenId, activeProcessoId, respostas[activeProcessoId]);
       setFinalizadoIds(prev => new Set([...prev, activeProcessoId]));
       setSavedIds(prev => new Set([...prev, activeProcessoId]));
       localStorage.removeItem(`sipoc_draft_${activeProcessoId}`);
@@ -719,8 +713,8 @@ export default function ClientView({ clientData }) {
                 </div>
               </SectionCard>
 
-              {/* ── Section 4: Levantamento de processo ── */}
-              <LevantamentoForm ref={levantamentoRef} processo={activeProcesso} />
+              {/* ── Section 4: Levantamento de processo (chat IA) ── */}
+              <LevantamentoChat sipocId={activeProcessoId} token={token} />
 
               {/* ── Save bar ── */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-8 py-5 mb-8 space-y-4">

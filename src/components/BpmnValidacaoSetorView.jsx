@@ -155,7 +155,7 @@ export default function BpmnValidacaoSetorView({ validacaoData }) {
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const resp = await fetch('/api/validar-bpmn-setor', {
+      const resp = await fetch('/api/validar-bpmn', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

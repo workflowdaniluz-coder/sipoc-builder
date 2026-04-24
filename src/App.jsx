@@ -715,7 +715,7 @@ function App() {
       if (vbToken) {
         window.history.replaceState({}, '', window.location.pathname);
         try {
-          const resp = await fetch(`/api/validar-bpmn-setor?vb=${encodeURIComponent(vbToken)}`);
+          const resp = await fetch(`/api/validar-bpmn?vb=${encodeURIComponent(vbToken)}`);
           const data = await resp.json();
           if (data.ok) {
             setValidacaoSetorData({ ...data });
@@ -848,6 +848,9 @@ function App() {
   const [agendarResultado, setAgendarResultado] = useState(null); // { token, link, expira_em, slots_count, qtd_escolha }
   const [ofertasAtivas, setOfertasAtivas]       = useState([]);
   const [ofertasCancelando, setOfertasCancelando] = useState(new Set());
+  const [levModal, setLevModal]                 = useState(null); // { tipo: 'conversa'|'estrutura', sipocId, nomeProcesso }
+  const [levConversa, setLevConversa]           = useState([]);
+  const [levCarregando, setLevCarregando]       = useState(false);
 
   const abrirAgendarModal = () => {
     setAgendarResultado(null);
@@ -2194,64 +2197,107 @@ function App() {
                           </div>
                         </div>
 
-                        {/* Card 4 — Levantamento de processo */}
-                        {current.levantamento_processo && (() => {
-                          const lev = current.levantamento_processo;
+                        {/* Card 4 — Levantamento de processo (chat IA) */}
+                        {(() => {
+                          const status = current.levantamento_status ?? 'pendente';
+                          const lev    = current.levantamento_processo;
+                          const badgeCls = status === 'concluido'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : status === 'em_andamento'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-slate-100 text-slate-500';
+                          const badgeTxt = status === 'concluido' ? 'Concluído'
+                            : status === 'em_andamento' ? 'Em andamento' : 'Pendente';
+
+                          const abrirConversa = async (sipocId, nomeProcesso) => {
+                            setLevModal({ tipo: 'conversa', sipocId, nomeProcesso });
+                            setLevCarregando(true);
+                            setLevConversa([]);
+                            try {
+                              const { data: { session } } = await supabase.auth.getSession();
+                              const res = await fetch(`/api/levantamento-chat?sipocId=${sipocId}&consultor=1`, {
+                                headers: { Authorization: `Bearer ${session?.access_token}` },
+                              });
+                              const json = await res.json();
+                              setLevConversa(json.historico ?? []);
+                            } catch { setLevConversa([]); }
+                            finally { setLevCarregando(false); }
+                          };
+
                           return (
                             <div className="rounded-2xl border border-slate-200 p-5 space-y-4">
-                              <div className="flex items-center gap-2.5 pb-3 border-b border-slate-100">
-                                <span className="text-base">🗺️</span>
-                                <div>
-                                  <p className="font-bold text-slate-800 text-sm leading-tight">Como o processo funciona</p>
-                                  <p className="text-xs text-slate-400">Preenchido pelo cliente</p>
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2.5">
+                                  <div>
+                                    <p className="font-bold text-slate-800 text-sm leading-tight">Levantamento do processo</p>
+                                    <p className="text-xs text-slate-400">Conversa com assistente de IA</p>
+                                  </div>
                                 </div>
+                                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeCls}`}>{badgeTxt}</span>
                               </div>
 
-                              {/* Início */}
-                              {lev.inicio && (
-                                <div className="space-y-2">
-                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                    <span className="w-4 h-4 rounded-full bg-[#16253e] text-white text-[9px] flex items-center justify-center flex-shrink-0">1</span>
-                                    Início
-                                  </p>
-                                  {lev.inicio.gatilho && <div><CFL>O que dá início</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.inicio.gatilho}</p></div>}
-                                  {lev.inicio.responsavel && <div><CFL>Quem inicia</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.inicio.responsavel}</p></div>}
-                                  {lev.inicio.condicao && <div><CFL>Pré-requisito</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.inicio.condicao}</p></div>}
+                              {status === 'pendente' && (
+                                <p className="text-sm text-slate-400">Cliente ainda não iniciou o levantamento.</p>
+                              )}
+
+                              {(status === 'em_andamento' || status === 'concluido') && (
+                                <div className="flex gap-2 flex-wrap">
+                                  <button
+                                    onClick={() => abrirConversa(current.id, current.nome_processo)}
+                                    className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
+                                    Ver conversa
+                                  </button>
+                                  {status === 'concluido' && lev && (
+                                    <button
+                                      onClick={() => setLevModal({ tipo: 'estrutura', sipocId: current.id, nomeProcesso: current.nome_processo, lev })}
+                                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-[#16253e] text-white hover:bg-[#1e3257] transition-colors">
+                                      Ver estrutura
+                                    </button>
+                                  )}
                                 </div>
                               )}
 
-                              {/* Atividades */}
-                              {lev.atividades?.length > 0 && (
-                                <div className="space-y-3">
-                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Atividades</p>
-                                  {lev.atividades.map((atv, i) => (
-                                    <div key={i} className="bg-slate-50 rounded-xl p-3 space-y-2 border border-slate-100">
-                                      <p className="text-xs font-bold text-[#ecbf03] uppercase tracking-wide">Atividade {i + 1}</p>
-                                      {atv.descricao && <p className="text-sm text-slate-700">{atv.descricao}</p>}
-                                      {atv.tem_decisao === 'sim' && atv.decisao_qual && (
-                                        <div className="text-xs text-slate-500 space-y-0.5">
-                                          <p><span className="font-semibold">Decisão:</span> {atv.decisao_qual}</p>
-                                          {atv.consequencia_sim && <p><span className="font-semibold">Se sim:</span> {atv.consequencia_sim}</p>}
-                                          {atv.consequencia_nao && <p><span className="font-semibold">Se não:</span> {atv.consequencia_nao}</p>}
-                                        </div>
+                              {/* Preview inline da estrutura quando concluído */}
+                              {status === 'concluido' && lev && (
+                                <div className="space-y-3 pt-2 border-t border-slate-100">
+                                  {lev.inicio && (
+                                    <div>
+                                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Início</p>
+                                      {lev.inicio.precisa_receber && <p className="text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2"><span className="font-semibold">Recebe:</span> {lev.inicio.precisa_receber}</p>}
+                                      {lev.inicio.quem_entrega && <p className="text-xs text-slate-600 mt-1"><span className="font-semibold">De:</span> {lev.inicio.quem_entrega}</p>}
+                                      {lev.inicio.bate_com_sipoc === false && lev.inicio.divergencia_sipoc && (
+                                        <p className="text-xs text-amber-600 mt-1">⚠ Divergência: {lev.inicio.divergencia_sipoc}</p>
                                       )}
-                                      {atv.volta_etapa === 'sim' && <p className="text-xs text-slate-500"><span className="font-semibold">Volta para:</span> atividade anterior</p>}
-                                      {atv.encerra_processo === 'sim' && <span className="inline-block text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Pode encerrar o processo</span>}
                                     </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {/* Fim */}
-                              {lev.fim && (
-                                <div className="space-y-2">
-                                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                                    <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[9px] flex items-center justify-center flex-shrink-0">✓</span>
-                                    Fim
-                                  </p>
-                                  {lev.fim.resultado && <div><CFL>O que marca o fim</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.fim.resultado}</p></div>}
-                                  {lev.fim.responsavel && <div><CFL>Quem finaliza</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.fim.responsavel}</p></div>}
-                                  {lev.fim.registros && <div><CFL>Registros gerados</CFL><p className="text-sm text-slate-700 bg-slate-50 rounded-xl px-3 py-2">{lev.fim.registros}</p></div>}
+                                  )}
+                                  {lev.atividades?.length > 0 && (
+                                    <div>
+                                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Atividades ({lev.atividades.length})</p>
+                                      <div className="space-y-2">
+                                        {lev.atividades.map((atv, i) => (
+                                          <div key={i} className="bg-slate-50 rounded-xl px-3 py-2 border border-slate-100">
+                                            <p className="text-[10px] font-bold text-[#ecbf03] uppercase mb-0.5">Etapa {atv.ordem ?? i + 1}</p>
+                                            <p className="text-xs text-slate-700">{atv.descricao}</p>
+                                            {atv.tem_decisao && atv.decisao && (
+                                              <p className="text-[11px] text-slate-500 mt-1">
+                                                <span className="font-semibold">Verificação:</span> {atv.decisao.verificacao}
+                                              </p>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {lev.fim && (
+                                    <div>
+                                      <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Fim</p>
+                                      {lev.fim.entrega && <p className="text-xs text-slate-600 bg-slate-50 rounded-lg px-3 py-2"><span className="font-semibold">Entrega:</span> {lev.fim.entrega}</p>}
+                                      {lev.fim.para_quem && <p className="text-xs text-slate-600 mt-1"><span className="font-semibold">Para:</span> {lev.fim.para_quem}</p>}
+                                      {lev.fim.bate_com_sipoc === false && lev.fim.divergencia_sipoc && (
+                                        <p className="text-xs text-amber-600 mt-1">⚠ Divergência: {lev.fim.divergencia_sipoc}</p>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2362,6 +2408,103 @@ function App() {
             )}
 
           </main>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Levantamento (conversa ou estrutura) ── */}
+      {levModal && (
+        <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setLevModal(null); }}>
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <div>
+                <p className="font-bold text-slate-800 text-sm">{levModal.nomeProcesso}</p>
+                <p className="text-xs text-slate-400">{levModal.tipo === 'conversa' ? 'Conversa com o assistente' : 'Estrutura extraída'}</p>
+              </div>
+              <button onClick={() => setLevModal(null)} aria-label="Fechar" className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">✕</button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-4">
+              {levModal.tipo === 'conversa' && (
+                levCarregando
+                  ? <p className="text-sm text-slate-400 text-center py-8">Carregando…</p>
+                  : levConversa.length === 0
+                    ? <p className="text-sm text-slate-400 text-center py-8">Nenhuma mensagem encontrada.</p>
+                    : <div className="space-y-4">
+                        {levConversa.map((msg, i) => {
+                          const isAss = msg.role === 'assistant';
+                          return (
+                            <div key={i} className={`flex ${isAss ? 'justify-start' : 'justify-end'} gap-2`}>
+                              {isAss && (
+                                <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#16253e] flex items-center justify-center">
+                                  <span className="text-white text-[9px] font-black">IA</span>
+                                </div>
+                              )}
+                              <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-xs leading-relaxed whitespace-pre-wrap ${
+                                isAss ? 'bg-slate-100 text-slate-700 rounded-tl-none' : 'bg-[#16253e] text-white rounded-tr-none'
+                              }`}>
+                                {msg.conteudo}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+              )}
+
+              {levModal.tipo === 'estrutura' && levModal.lev && (() => {
+                const lev = levModal.lev;
+                return (
+                  <div className="space-y-5 text-sm">
+                    {lev.inicio && (
+                      <div>
+                        <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">INÍCIO</p>
+                        <div className="space-y-1.5">
+                          {lev.inicio.precisa_receber && <p><span className="font-semibold text-slate-700">Recebe:</span> <span className="text-slate-600">{lev.inicio.precisa_receber}</span></p>}
+                          {lev.inicio.quem_entrega && <p><span className="font-semibold text-slate-700">De:</span> <span className="text-slate-600">{lev.inicio.quem_entrega}</span></p>}
+                          <p><span className="font-semibold text-slate-700">Bate com SIPOC:</span> <span className={lev.inicio.bate_com_sipoc ? 'text-emerald-600' : 'text-amber-600'}>{lev.inicio.bate_com_sipoc ? 'Sim' : 'Não'}</span></p>
+                          {lev.inicio.bate_com_sipoc === false && lev.inicio.divergencia_sipoc && (
+                            <p className="text-amber-600 bg-amber-50 rounded-lg px-3 py-2">{lev.inicio.divergencia_sipoc}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {lev.atividades?.map((atv, i) => (
+                      <div key={i}>
+                        <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">ATIVIDADE {atv.ordem ?? i + 1}</p>
+                        <div className="space-y-1.5">
+                          <p className="text-slate-700">{atv.descricao}</p>
+                          {atv.tem_decisao && atv.decisao && (
+                            <div className="bg-amber-50 rounded-lg px-3 py-2 space-y-1">
+                              <p><span className="font-semibold text-slate-700">Verificação:</span> {atv.decisao.verificacao}</p>
+                              {atv.decisao.consequencias?.volta_etapa && <p className="text-xs text-slate-500">Volta para: {atv.decisao.consequencias.volta_etapa}</p>}
+                              {atv.decisao.consequencias?.aciona_area && (
+                                <p className="text-xs text-slate-500">Aciona {atv.decisao.consequencias.aciona_area.area} — pede: {atv.decisao.consequencias.aciona_area.pedido} — recebe: {atv.decisao.consequencias.aciona_area.retorno}</p>
+                              )}
+                              {atv.decisao.consequencias?.interrompe && <p className="text-xs text-red-600">Pode interromper: {atv.decisao.consequencias.motivo_interrupcao}</p>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {lev.fim && (
+                      <div>
+                        <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">FIM</p>
+                        <div className="space-y-1.5">
+                          {lev.fim.entrega && <p><span className="font-semibold text-slate-700">Entrega:</span> <span className="text-slate-600">{lev.fim.entrega}</span></p>}
+                          {lev.fim.para_quem && <p><span className="font-semibold text-slate-700">Para:</span> <span className="text-slate-600">{lev.fim.para_quem}</span></p>}
+                          <p><span className="font-semibold text-slate-700">Bate com SIPOC:</span> <span className={lev.fim.bate_com_sipoc ? 'text-emerald-600' : 'text-amber-600'}>{lev.fim.bate_com_sipoc ? 'Sim' : 'Não'}</span></p>
+                          {lev.fim.bate_com_sipoc === false && lev.fim.divergencia_sipoc && (
+                            <p className="text-amber-600 bg-amber-50 rounded-lg px-3 py-2">{lev.fim.divergencia_sipoc}</p>
+                          )}
+                          {lev.fim.observacoes && <p className="text-slate-500 bg-slate-50 rounded-lg px-3 py-2">{lev.fim.observacoes}</p>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}
