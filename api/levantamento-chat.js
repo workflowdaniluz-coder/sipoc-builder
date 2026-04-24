@@ -10,8 +10,8 @@
 import { createClient } from '@supabase/supabase-js'
 
 const ORIGIN = process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br'
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
-const MODEL = 'claude-sonnet-4-20250514'
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+const GEMINI_MODEL = 'gemini-2.0-flash'
 
 function getSupabase() {
   return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -172,22 +172,26 @@ function mensagemInicial(nomeProcesso) {
   return `Olá! Vou te fazer algumas perguntas sobre o processo **${nomeProcesso}** para entender melhor como ele funciona no seu dia a dia. Pode falar à vontade, sem termos técnicos.\n\nPara começar: o que você precisa receber, ou o que precisa acontecer, para você dar início a este processo?`
 }
 
-// ── Chamada Claude API ────────────────────────────────────────────
+// ── Chamada Gemini API ────────────────────────────────────────────
 
-async function chamarClaude(systemPrompt, historico, maxTokens = 1000) {
-  const messages = historico.map(h => ({ role: h.role, content: h.conteudo }))
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+async function chamarGemini(systemPrompt, historico, maxTokens = 1000) {
+  const contents = historico.map(h => ({
+    role: h.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: h.conteudo }],
+  }))
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: {
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: systemPrompt, messages }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      generationConfig: { maxOutputTokens: maxTokens },
+    }),
   })
   const json = await resp.json()
-  if (!resp.ok) throw new Error('Claude API error: ' + (json.error?.message ?? resp.status))
-  return json.content[0].text
+  if (!resp.ok) throw new Error('Gemini API error: ' + (json.error?.message ?? resp.status))
+  return json.candidates[0].content.parts[0].text
 }
 
 // ── Extração do objeto estruturado ───────────────────────────────
@@ -231,25 +235,22 @@ Se alguma informação não foi mencionada, use null para campos opcionais e str
 CONVERSA:
 ${historicoFmt}`
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: {
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }],
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 2000 },
     }),
   })
   const json = await resp.json()
-  if (!resp.ok) throw new Error('Claude extract error: ' + resp.status)
+  if (!resp.ok) throw new Error('Gemini extract error: ' + resp.status)
+  const raw = json.candidates[0].content.parts[0].text
   try {
-    return JSON.parse(json.content[0].text)
+    return JSON.parse(raw.replace(/```json\n?|\n?```/g, '').trim())
   } catch {
-    return { preenchido_em: new Date().toISOString(), raw: json.content[0].text }
+    return { preenchido_em: new Date().toISOString(), raw }
   }
 }
 
@@ -319,7 +320,7 @@ async function handlePost(req, res) {
   if (!token || !sipocId) return res.status(400).json({ ok: false, error: 'token e sipocId obrigatórios.' })
   if (!mensagem?.trim()) return res.status(400).json({ ok: false, error: 'mensagem não pode ser vazia.' })
 
-  if (!ANTHROPIC_API_KEY) return res.status(500).json({ ok: false, error: 'ANTHROPIC_API_KEY não configurada.' })
+  if (!GEMINI_API_KEY) return res.status(500).json({ ok: false, error: 'GEMINI_API_KEY não configurada.' })
 
   const supabase = getSupabase()
   const acesso = await validarToken(supabase, token)
@@ -341,9 +342,9 @@ async function handlePost(req, res) {
   const systemPrompt = buildSystemPrompt(sipoc)
   let respostaBruta
   try {
-    respostaBruta = await chamarClaude(systemPrompt, historico)
+    respostaBruta = await chamarGemini(systemPrompt, historico)
   } catch (err) {
-    console.error('[levantamento-chat] Claude error:', err.message)
+    console.error('[levantamento-chat] Gemini error:', err.message)
     return res.status(502).json({ ok: false, error: 'Erro ao chamar o assistente. Tente novamente.' })
   }
 
