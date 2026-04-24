@@ -352,7 +352,7 @@ async function handlePost(req, res) {
     respostaBruta = await chamarGemini(systemPrompt, historico)
   } catch (err) {
     console.error('[levantamento-chat] Gemini error:', err.message)
-    return res.status(500).json({ ok: false, error: 'Erro ao chamar o assistente. Tente novamente.' })
+    return res.status(500).json({ ok: false, error: err.message })
   }
 
   // 4. Detecta conclusão
