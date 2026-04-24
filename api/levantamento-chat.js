@@ -175,10 +175,13 @@ function mensagemInicial(nomeProcesso) {
 // ── Chamada Gemini API ────────────────────────────────────────────
 
 async function chamarGemini(systemPrompt, historico, maxTokens = 1000) {
-  const contents = historico.map(h => ({
+  // Gemini exige que contents comece com 'user' — remove mensagens 'model' iniciais
+  const mapped = historico.map(h => ({
     role: h.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: h.conteudo }],
   }))
+  const firstUser = mapped.findIndex(m => m.role === 'user')
+  const contents = firstUser >= 0 ? mapped.slice(firstUser) : mapped
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
   const resp = await fetch(url, {
     method: 'POST',
