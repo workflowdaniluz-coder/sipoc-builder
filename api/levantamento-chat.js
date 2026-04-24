@@ -192,8 +192,12 @@ async function chamarGemini(systemPrompt, historico, maxTokens = 1000) {
       generationConfig: { maxOutputTokens: maxTokens },
     }),
   })
-  const json = await resp.json()
-  if (!resp.ok) throw new Error('Gemini API error: ' + (json.error?.message ?? resp.status))
+  const rawText = await resp.text()
+  if (!resp.ok) {
+    console.error('[levantamento-chat] Gemini HTTP', resp.status, rawText.slice(0, 500))
+    throw new Error('Gemini API error ' + resp.status + ': ' + rawText.slice(0, 200))
+  }
+  const json = JSON.parse(rawText)
   return json.candidates[0].content.parts[0].text
 }
 
