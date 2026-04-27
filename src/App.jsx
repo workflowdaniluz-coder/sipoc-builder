@@ -1335,6 +1335,7 @@ function App() {
           onBack={() => setView('dashboard')}
           onSelecionarSetor={selecionarSetor}
           onRefresh={() => carregarDetalhes(activeProject.id)}
+          onCriarSetor={() => setNovoSetorModal(true)}
         />
       )}
 

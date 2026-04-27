@@ -74,7 +74,7 @@ function InfoRow({ label, value }) {
 
 // ── Componente principal ──────────────────────────────────────────
 
-export default function ProjectView({ projeto, isLoading, onBack, onSelecionarSetor, onRefresh }) {
+export default function ProjectView({ projeto, isLoading, onBack, onSelecionarSetor, onRefresh, onCriarSetor }) {
   const [statusDropdown, setStatusDropdown] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [drawerOpen,     setDrawerOpen]     = useState(false)
@@ -394,11 +394,23 @@ export default function ProjectView({ projeto, isLoading, onBack, onSelecionarSe
 
       {/* Setores */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Setores</p>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Setores</p>
+          {onCriarSetor && (
+            <button onClick={onCriarSetor}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02]
+                         text-[#16253e] text-xs font-bold transition-all shadow-sm shadow-[#ecbf03]/20">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Novo setor
+            </button>
+          )}
+        </div>
         {(!projeto.setores || projeto.setores.length === 0) ? (
           <div className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center">
             <p className="text-sm text-slate-400">Nenhum setor cadastrado.</p>
-            <p className="text-xs text-slate-400 mt-1">Abra as ferramentas de um setor para começar.</p>
+            <p className="text-xs text-slate-400 mt-1">Clique em "Novo setor" para começar.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
