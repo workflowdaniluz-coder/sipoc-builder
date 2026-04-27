@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { logEvent, logError } from './logger.js'
 
 const BASE = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
 
@@ -20,13 +21,20 @@ export async function createHoldEvent({ accessToken, clienteNome, startISO, endI
     reminders: { useDefault: false },
   }
 
-  const resp = await fetch(BASE, {
-    method: 'POST',
-    headers: authHeader(accessToken),
-    body: JSON.stringify(body),
-  })
-  const event = await resp.json()
-  if (!resp.ok) throw new Error('Erro ao criar hold: ' + (event.error?.message ?? resp.status))
+  let event
+  try {
+    const resp = await fetch(BASE, {
+      method: 'POST',
+      headers: authHeader(accessToken),
+      body: JSON.stringify(body),
+    })
+    event = await resp.json()
+    if (!resp.ok) throw new Error('Erro ao criar hold: ' + (event.error?.message ?? resp.status))
+  } catch (err) {
+    logError('gcal.error', err, { operation: 'createHoldEvent' })
+    throw err
+  }
+  logEvent('gcal.hold_created', { clienteNome, startISO, googleEventId: event.id })
   return { googleEventId: event.id }
 }
 
@@ -41,8 +49,11 @@ export async function deleteHoldEvent({ accessToken, googleEventId }) {
     })
     if (!resp.ok && resp.status !== 404 && resp.status !== 410) {
       console.warn('[google-calendar] deleteHoldEvent status inesperado:', resp.status, googleEventId)
+    } else {
+      logEvent('gcal.hold_deleted', { googleEventId })
     }
   } catch (err) {
+    logError('gcal.error', err, { operation: 'deleteHoldEvent', googleEventId })
     console.warn('[google-calendar] deleteHoldEvent falhou (ignorado):', googleEventId, err.message)
   }
 }

@@ -1,3 +1,5 @@
+import { logEvent, logError } from './_lib/logger.js'
+
 const MONDAY_API_URL = 'https://api.monday.com/v2'
 
 // IDs fixos — workspace Consultoria + pasta template
@@ -49,6 +51,7 @@ async function criarPastaCliente(apiKey, clienteNome) {
   `, { name: clienteNome, wsId: WORKSPACE_ID })
 
   const folderId = folderData.create_folder.id
+  logEvent('monday.folder_created', { clienteNome, folderId })
 
   // 2. Duplica cada board do template para a nova pasta
   let cronogramaBoardId = null
@@ -75,6 +78,8 @@ async function criarPastaCliente(apiKey, clienteNome) {
       wsId: WORKSPACE_ID,
     })
 
+    logEvent('monday.board_duplicated', { clienteNome, tipo: tmpl.tipo, boardId: dupData.duplicate_board.board.id })
+
     if (tmpl.tipo === 'cronograma') {
       cronogramaBoardId = dupData.duplicate_board.board.id
     }
@@ -99,6 +104,7 @@ async function adicionarProcesso(apiKey, boardId, processoNome) {
     `, { boardId: String(boardId), groupId: GROUP_TO_BE, name: processoNome }),
   ])
 
+  logEvent('monday.process_added', { boardId, processoNome })
   return {
     itemIdAsis: asIsData.create_item.id,
     itemIdTobe: toBeData.create_item.id,
@@ -136,7 +142,7 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ ok: false, error: 'Ação inválida.' })
   } catch (err) {
-    console.error('[monday]', err.message)
+    logError('monday.handler_error', err, { action })
     return res.status(500).json({ ok: false, error: err.message })
   }
 }

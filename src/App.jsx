@@ -1,18 +1,11 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Auth } from '@supabase/auth-ui-react';
 import { ThemeSupa } from '@supabase/auth-ui-shared';
 import { supabase } from './lib/supabase';
 import {
-  criarProjeto, listarProjetos, listarProcessos, salvarProcesso,
+  salvarProcesso,
   gerarTokenAcesso, listarTokensDoSetor, revogarToken, buscarSetorPorToken, verificarSenhaToken,
-  deletarProcesso, calcularProgresso, atualizarResponsavelSetor, criarSetor,
-  listarNotificacoes, atualizarStatusNotificacao, contarNotificacoesUnread,
-  buscarDetalhesCliente,
-  getVinculos, addVinculo, removeVinculo, removeVinculosByChip,
-  getGoogleAuthStatus,
-  ofertarDisponibilidade,
-  cancelarOferta,
-  listarTokensAgendamentoPorSetor,
+  addVinculo,
 } from './lib/db';
 import { STATUS_CONFIG } from './lib/constants';
 import CreateProjectModal from './components/CreateProjectModal';
@@ -23,6 +16,10 @@ import BpmnTab from './components/BpmnTab';
 import BpmnValidacaoSetorView, { ErroTokenView } from './components/BpmnValidacaoSetorView';
 import FormularioContatosView from './components/FormularioContatosView';
 import AgendarView from './components/AgendarView';
+import ClientView from './components/ClientView';
+import { ProjectProvider, useProject } from './contexts/ProjectContext';
+import { BuilderProvider, useBuilder } from './contexts/BuilderContext';
+import { AgendamentoProvider, useAgendamento } from './contexts/AgendamentoContext';
 
 const CONSULTORES = [
   'Guilherme Jesus',
@@ -31,7 +28,6 @@ const CONSULTORES = [
   'Daniela Silveira',
   'Iélifer Marques',
 ];
-import ClientView from './components/ClientView';
 
 // ─────────────────────────────────────────────────────────────────
 // Design tokens & helpers
@@ -626,10 +622,10 @@ const PasswordGate = ({ token, onSuccess }) => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-// App
+// AppInner — uses context hooks
 // ─────────────────────────────────────────────────────────────────
 
-function App() {
+function AppInner() {
   // ── Auth ──────────────────────────────────────
   const [appMode, setAppMode]       = useState('loading');
   const [session, setSession]       = useState(null);
@@ -753,42 +749,99 @@ function App() {
   // ── Navegação ─────────────────────────────────
   const [view, setView]           = useState('dashboard');
   const [mode, setMode]           = useState('consultant');
-  const [activeTab, setActiveTab] = useState('sipoc');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [syncStatus, setSyncStatus]     = useState({});
+  const [activeSetor, setActiveSetor] = useState(null);
 
-  // ── Auto-save refs ────────────────────────────
-  const currentRef       = useRef(null);
-  const activeProjectRef = useRef(null);
-  const autoSaveTimer    = useRef(null);
+  // ── Context hooks ─────────────────────────────
+  const proj = useProject();
+  const builder = useBuilder();
+  const agenda = useAgendamento();
 
-  // ── Dashboard ─────────────────────────────────
-  const [projetos, setProjetos]             = useState([]);
-  const [activeProject, setActiveProject]   = useState(null);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
-  const [criarProjetoModal, setCriarProjetoModal] = useState(false);
+  // Destructure ProjectContext values
+  const {
+    projetos, setProjetos, activeProject, setActiveProject,
+    isLoadingProjects, criarProjetoModal, setCriarProjetoModal,
+    projetoDetalhes, isLoadingDetalhes,
+    unreadCounts, notifications, setNotifications,
+    notifModalData, setNotifModalData, notifSectionOpen, setNotifSectionOpen,
+    novoSetorModal, setNovoSetorModal, novoSetorNome, setNovoSetorNome,
+    novoSetorResp, setNovoSetorResp,
+    carregarProjetos, carregarDetalhes, carregarNotificacoes,
+    handleDismissNotif, handleMarkRead, handleCriarSetor,
+  } = proj;
 
-  // ── Página do projeto ─────────────────────────
-  const [projetoDetalhes, setProjetoDetalhes]         = useState(null);
-  const [isLoadingDetalhes, setIsLoadingDetalhes]     = useState(false);
+  // Destructure BuilderContext values
+  const {
+    defaultProcess,
+    processes, setProcesses, activeProcessId, setActiveProcessId,
+    isLoadingProcesses, syncStatus, setSyncStatus, isSubmitting,
+    clienteExpInputs, clienteExpOutputs,
+    setorResponsavel, setSetorResponsavel, setorDropdownOpen, setSetorDropdownOpen,
+    filtroResponsavel, setFiltroResponsavel,
+    vinculos, openPopoverKey, setOpenPopoverKey,
+    activeTab, setActiveTab,
+    current, activeProcessIndex, processosPorSetor, globalOutputs, progresso,
+    carregarProcessos, resetBuilder,
+    guardar, excluirProcesso,
+    upd, updRasci, updArr, rmArr, addArr,
+    handleVinculoAdd, handleVinculoRemove, handleChipRemove,
+    getRC, updCI, updCO, updCP, updCR, togCI, togCO,
+    handleResponsavelChange, handleAdicionarProcesso: _handleAdicionarProcesso,
+    setActiveProjectInBuilder, setSessionInBuilder,
+  } = builder;
 
-  // ── Notificações ──────────────────────────────
-  const [unreadCounts, setUnreadCounts]         = useState({}); // { [project_id]: n }
-  const [notifications, setNotifications]       = useState([]); // do projeto ativo
-  const [notifModalData, setNotifModalData]     = useState(null); // notif para modal Adicionar SIPOC
-  const [notifSectionOpen, setNotifSectionOpen] = useState(true);
+  // Destructure AgendamentoContext values
+  const {
+    googleAuth, googleAuthLoading,
+    agendarModalOpen, setAgendarModalOpen, agendarForm, setAgendarForm,
+    agendarParticipanteInput, setAgendarParticipanteInput,
+    agendarLoading, agendarResultado,
+    ofertasAtivas, setOfertasAtivas, ofertasCancelando,
+    levModal, setLevModal, levConversa, levCarregando,
+    carregarGoogleAuth, handleConectarGoogle, handleDesconectarGoogle,
+    abrirAgendarModal, carregarOfertasAtivas, handleOfertarSubmit, handleCancelarOferta,
+    setActiveProjectInAgenda, setActiveSetorInAgenda, setSessionInAgenda,
+  } = agenda;
 
-  // ── Google Calendar OAuth ──────────────────────
-  const [googleAuth, setGoogleAuth]         = useState(null); // { conectado, email, conectadoEm } | null
-  const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
+  // Wrapper for handleAdicionarProcesso that passes activeSetor
+  const handleAdicionarProcesso = () => _handleAdicionarProcesso(activeSetor);
 
-  const carregarGoogleAuth = async () => {
-    if (!session?.user?.id) return;
-    try {
-      const status = await getGoogleAuthStatus(session.user.id);
-      setGoogleAuth(status);
-    } catch { setGoogleAuth({ conectado: false, email: null, conectadoEm: null }); }
+  // ── Cross-context orchestrators ───────────────
+
+  const selecionarProjeto = (p) => {
+    setActiveProject(p);
+    setActiveSetor(null);
+    setView('project');
+    carregarDetalhes(p.id);
   };
+
+  const selecionarSetor = (setor) => {
+    setActiveSetor(setor);
+    setView('setor');
+    setOfertasAtivas([]);
+    setActiveSetorInAgenda(setor);
+    carregarOfertasAtivas(setor.id);
+  };
+
+  const abrirFerramentas = async (p, setor = null) => {
+    setActiveProject(p);
+    setActiveProjectInBuilder(p);
+    setActiveProjectInAgenda(p);
+    setActiveSetorInAgenda(setor);
+    setActiveSetor(setor);
+    setView('builder');
+    resetBuilder();
+    setNotifications([]); setNotifSectionOpen(true);
+    carregarNotificacoes(p.id);
+    await carregarProcessos(p.id);
+  };
+
+  // ── Sync session into contexts ────────────────
+  useEffect(() => {
+    setSessionInBuilder(session);
+    setSessionInAgenda(session);
+  }, [session]); // eslint-disable-line
+
+  useEffect(() => { if (appMode === 'consultant') carregarProjetos(); }, [appMode]); // eslint-disable-line
 
   useEffect(() => {
     if (appMode !== 'consultant' || !session?.user?.id) return;
@@ -803,404 +856,7 @@ function App() {
         alert(`Erro ao conectar Google Calendar: ${reason}`);
       }
     }
-  }, [appMode, session?.user?.id]);
-
-  const handleConectarGoogle = async () => {
-    setGoogleAuthLoading(true);
-    try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      const resp = await fetch('/api/auth/google/start', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${s.access_token}` },
-      });
-      const json = await resp.json();
-      if (json.ok) window.location.href = json.authUrl;
-      else alert('Erro ao iniciar conexão: ' + (json.error ?? 'tente novamente'));
-    } catch { alert('Erro ao iniciar conexão com o Google.'); }
-    finally { setGoogleAuthLoading(false); }
-  };
-
-  const handleDesconectarGoogle = async () => {
-    if (!window.confirm('Desconectar sua conta Google Calendar?')) return;
-    setGoogleAuthLoading(true);
-    try {
-      const { data: { session: s } } = await supabase.auth.getSession();
-      const resp = await fetch('/api/auth/google/disconnect', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${s.access_token}` },
-      });
-      const json = await resp.json();
-      if (json.ok) await carregarGoogleAuth();
-      else alert('Erro ao desconectar: ' + (json.error ?? 'tente novamente'));
-    } catch { alert('Erro ao desconectar Google.'); }
-    finally { setGoogleAuthLoading(false); }
-  };
-
-  // ── Modal de agendamento (ofertar disponibilidade) ──
-  const [agendarModalOpen, setAgendarModalOpen] = useState(false);
-  const [agendarForm, setAgendarForm]           = useState({
-    tipo: 'sipoc', tipo_customizado: '',
-    duracao_min: 60, sipoc_ids: [], slots: [''], qtd_escolha: 1,
-    participantes_sugeridos: [],
-  });
-  const [agendarParticipanteInput, setAgendarParticipanteInput] = useState({ nome: '', email: '' });
-  const [agendarLoading, setAgendarLoading]     = useState(false);
-  const [agendarResultado, setAgendarResultado] = useState(null); // { token, link, expira_em, slots_count, qtd_escolha }
-  const [ofertasAtivas, setOfertasAtivas]       = useState([]);
-  const [ofertasCancelando, setOfertasCancelando] = useState(new Set());
-  const [levModal, setLevModal]                 = useState(null); // { tipo: 'conversa'|'estrutura', sipocId, nomeProcesso }
-  const [levConversa, setLevConversa]           = useState([]);
-  const [levCarregando, setLevCarregando]       = useState(false);
-
-  const abrirAgendarModal = () => {
-    setAgendarResultado(null);
-    setAgendarForm({
-      tipo: 'sipoc', tipo_customizado: '',
-      duracao_min: 60, sipoc_ids: [], slots: [''], qtd_escolha: 1,
-      participantes_sugeridos: [],
-    });
-    setAgendarParticipanteInput({ nome: '', email: '' });
-    setAgendarModalOpen(true);
-  };
-
-  const carregarOfertasAtivas = async (setorId) => {
-    try {
-      const data = await listarTokensAgendamentoPorSetor(setorId);
-      setOfertasAtivas(data);
-    } catch { /* silencia */ }
-  };
-
-  const handleOfertarSubmit = async () => {
-    const slotsValidos = agendarForm.slots.filter(s => s.trim());
-    if (slotsValidos.length < 2) return alert('Informe pelo menos 2 horários disponíveis.');
-    if (agendarForm.tipo === 'outra' && !agendarForm.tipo_customizado.trim()) return alert('Informe o tipo customizado.');
-    const minFuturo = Date.now() + 60 * 60 * 1000;
-    for (const s of slotsValidos) {
-      if (new Date(s).getTime() < minFuturo) return alert('Todos os horários devem ser pelo menos 1h no futuro.');
-    }
-    setAgendarLoading(true);
-    try {
-      const result = await ofertarDisponibilidade({
-        cliente_id: activeProject.id,
-        setor_id: activeSetor.id,
-        tipo: agendarForm.tipo,
-        tipo_customizado: agendarForm.tipo === 'outra' ? agendarForm.tipo_customizado.trim() : undefined,
-        duracao_min: agendarForm.duracao_min,
-        sipoc_ids: agendarForm.sipoc_ids,
-        slots: slotsValidos,
-        qtd_escolha: agendarForm.qtd_escolha,
-        participantes_sugeridos: agendarForm.participantes_sugeridos,
-      });
-      setAgendarResultado(result);
-      carregarOfertasAtivas(activeSetor.id);
-    } catch (err) {
-      alert('Erro: ' + err.message);
-    } finally {
-      setAgendarLoading(false);
-    }
-  };
-
-  const handleCancelarOferta = async (token) => {
-    if (!confirm('Cancelar esta oferta? Os horários reservados no Google Calendar serão liberados.')) return;
-    setOfertasCancelando(prev => new Set(prev).add(token));
-    try {
-      await cancelarOferta(token);
-      setOfertasAtivas(prev => prev.filter(o => o.token !== token));
-    } catch (err) {
-      alert('Erro ao cancelar: ' + err.message);
-    } finally {
-      setOfertasCancelando(prev => { const s = new Set(prev); s.delete(token); return s; });
-    }
-  };
-
-  const carregarProjetos = async () => {
-    setIsLoadingProjects(true);
-    try {
-      const lista = await listarProjetos();
-      setProjetos(lista);
-      // Carrega contagem de unread para todos os projetos de uma vez
-      const counts = await contarNotificacoesUnread(lista.map(p => p.id)).catch(() => ({}));
-      setUnreadCounts(counts);
-    } catch (err) { alert('Não foi possível carregar os projetos: ' + err.message); }
-    finally { setIsLoadingProjects(false); }
-  };
-
-  const carregarNotificacoes = async (projectId) => {
-    try {
-      const data = await listarNotificacoes(projectId);
-      setNotifications(data);
-    } catch { /* silencia — notificações não bloqueiam o fluxo */ }
-  };
-
-  const handleDismissNotif = async (notifId) => {
-    try {
-      await atualizarStatusNotificacao(notifId, 'dismissed');
-      setNotifications(prev => prev.filter(n => n.id !== notifId));
-      setUnreadCounts(prev => ({
-        ...prev,
-        [activeProject.id]: Math.max(0, (prev[activeProject.id] ?? 0) - 1),
-      }));
-    } catch (err) { alert('❌ ' + err.message); }
-  };
-
-  const handleMarkRead = async (notifId) => {
-    try {
-      await atualizarStatusNotificacao(notifId, 'read');
-      setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, status: 'read' } : n));
-      setUnreadCounts(prev => ({
-        ...prev,
-        [activeProject.id]: Math.max(0, (prev[activeProject.id] ?? 0) - 1),
-      }));
-    } catch { /* silencia */ }
-  };
-
-  useEffect(() => { if (appMode === 'consultant') carregarProjetos(); }, [appMode]);
-
-  // ── Builder ───────────────────────────────────
-  const defaultProcess = {
-    id: 'p1', supabase_id: null, setor: 'Geral', setor_id: null,
-    name: 'Novo Processo',
-    suppliers: [''], inputs: [''], outputs: [''], customers: [''],
-    ferramentas: [], periodicidade: '', tipo: '', inputsPadronizados: '',
-    outputsPadronizados: '', geridoDados: '', tecnologia: '',
-    maturidade: '', esforco: '', impacto: '', observacoes: '',
-    rasci: { r: [], a: [], s: [], c: [], i: [] },
-  };
-
-  const [processes, setProcesses]             = useState([]);
-  const [activeProcessId, setActiveProcessId] = useState(null);
-  const [isLoadingProcesses, setIsLoadingProcesses] = useState(false);
-  const [clienteExpInputs,  setClienteExpInputs]  = useState({});
-  const [clienteExpOutputs, setClienteExpOutputs] = useState({});
-  const [setorResponsavel, setSetorResponsavel]   = useState({}); // { setor_id: nome }
-  const [setorDropdownOpen, setSetorDropdownOpen] = useState(null); // setor_id aberto
-  const [filtroResponsavel, setFiltroResponsavel] = useState('');
-  const [vinculos,          setVinculos]          = useState([]);
-  const [openPopoverKey,    setOpenPopoverKey]    = useState(null);
-  const [novoSetorModal, setNovoSetorModal]       = useState(false);
-  const [novoSetorNome,  setNovoSetorNome]        = useState('');
-  const [novoSetorResp,  setNovoSetorResp]        = useState('');
-
-  const carregarDetalhes = async (projectId) => {
-    setIsLoadingDetalhes(true);
-    try {
-      const detalhes = await buscarDetalhesCliente(projectId);
-      setProjetoDetalhes(detalhes);
-    } catch (err) { alert('❌ ' + err.message); }
-    finally { setIsLoadingDetalhes(false); }
-  };
-
-  const [activeSetor, setActiveSetor] = useState(null);
-
-  const selecionarProjeto = async (proj) => {
-    setActiveProject(proj);
-    setActiveSetor(null);
-    setView('project');
-    carregarDetalhes(proj.id);
-  };
-
-  const selecionarSetor = (setor) => {
-    setActiveSetor(setor);
-    setView('setor');
-    setOfertasAtivas([]);
-    carregarOfertasAtivas(setor.id);
-  };
-
-  const abrirFerramentas = async (proj, setor = null) => {
-    setActiveProject(proj);
-    setActiveSetor(setor);
-    setView('builder');
-    setSyncStatus({}); setActiveTab('sipoc'); setIsLoadingProcesses(true);
-    setNotifications([]); setNotifSectionOpen(true);
-    carregarNotificacoes(proj.id);
-    try {
-      const procs = await listarProcessos(proj.id);
-      if (procs.length > 0) {
-        setProcesses(procs); setActiveProcessId(procs[0].id);
-        const s = {}; procs.forEach(p => { s[p.id] = 'synced'; }); setSyncStatus(s);
-        // Popula responsáveis por setor
-        const resp = {};
-        procs.forEach(p => { if (p.setor_id && p.setor_responsavel) resp[p.setor_id] = p.setor_responsavel; });
-        setSetorResponsavel(resp);
-      } else { setProcesses([defaultProcess]); setActiveProcessId('p1'); }
-    } catch (err) {
-      alert('❌ ' + err.message);
-      setProcesses([defaultProcess]); setActiveProcessId('p1');
-    } finally { setIsLoadingProcesses(false); }
-  };
-
-  const handleResponsavelChange = async (setorId, nome) => {
-    setSetorResponsavel(prev => ({ ...prev, [setorId]: nome }));
-    try { await atualizarResponsavelSetor(setorId, nome || null); }
-    catch (err) { alert('❌ ' + err.message); }
-  };
-
-  const handleCriarSetor = async () => {
-    const nome = novoSetorNome.trim();
-    if (!nome || !activeProject?.id) return;
-    try {
-      const setor = await criarSetor(activeProject.id, nome, novoSetorResp || null);
-      if (novoSetorResp) setSetorResponsavel(prev => ({ ...prev, [setor.id]: novoSetorResp }));
-      setNovoSetorModal(false); setNovoSetorNome(''); setNovoSetorResp('');
-      carregarDetalhes(activeProject.id);
-    } catch (err) { alert('❌ ' + err.message); }
-  };
-
-  const handleAdicionarProcesso = () => {
-    if (!activeSetor?.id) return;
-    const newId = `p${Date.now()}`;
-    setProcesses(prev => [...prev, {
-      ...defaultProcess, id: newId, supabase_id: null,
-      name: 'Novo Processo', setor: activeSetor.nome, setor_id: activeSetor.id,
-    }]);
-    setActiveProcessId(newId);
-  };
-
-  const activeProcessIndex = processes.findIndex(p => p.id === activeProcessId);
-  const current = processes[activeProcessIndex] || defaultProcess;
-
-  // Reset client card expand state when active process changes
-  useEffect(() => {
-    const inputKeys  = (current.inputs  || []).filter(s => s.trim());
-    const outputKeys = (current.outputs || []).filter(s => s.trim());
-    setClienteExpInputs( inputKeys.length  > 0 ? { [inputKeys[0]]:  true } : {});
-    setClienteExpOutputs(outputKeys.length > 0 ? { [outputKeys[0]]: true } : {});
-  }, [activeProcessId]); // eslint-disable-line
-
-  useEffect(() => {
-    const sid = current.supabase_id;
-    if (!sid || String(sid).startsWith('p')) { setVinculos([]); return; }
-    getVinculos(sid).then(setVinculos).catch(() => {});
-  }, [current.supabase_id]); // eslint-disable-line
-
-  const processosPorSetor = useMemo(() =>
-    processes.reduce((acc, p) => { (acc[p.setor] ??= []).push(p); return acc; }, {}), [processes]);
-
-  const globalOutputs = useMemo(() =>
-    processes.flatMap(p => p.outputs.filter(o => o.trim()).map(o => ({ processo: p.name, output: o }))), [processes]);
-
-  const progresso = useMemo(() => {
-    const map = {};
-    processes.forEach(p => { map[p.id] = calcularProgresso(p); });
-    return map;
-  }, [processes]);
-
-  // Mantém refs sempre atualizados para uso no auto-save
-  useEffect(() => { currentRef.current = current; }, [current]);
-  useEffect(() => { activeProjectRef.current = activeProject; }, [activeProject]);
-
-  const scheduleAutoSave = useCallback(() => {
-    clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(async () => {
-      const proc = currentRef.current;
-      const proj = activeProjectRef.current;
-      if (!proj?.id) return;
-      if (!proc?.supabase_id || proc.supabase_id.startsWith('p')) return;
-      try {
-        setSyncStatus(prev => ({ ...prev, [proc.id]: 'saving' }));
-        const { supabase_id, setor_id } = await salvarProcesso(proj.id, proc);
-        setProcesses(prev => prev.map(p => p.id === proc.id ? { ...p, supabase_id, setor_id, id: supabase_id } : p));
-        setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }));
-        setActiveProcessId(supabase_id);
-      } catch (err) {
-        console.error('Auto-save falhou:', err.message);
-        setSyncStatus(prev => ({ ...prev, [proc.id]: 'draft' }));
-      }
-    }, 2000);
-  }, []);
-
-  const markDraft = () => {
-    setSyncStatus(prev => ({ ...prev, [activeProcessId]: 'draft' }));
-    scheduleAutoSave();
-  };
-
-  const guardar = async () => {
-    if (!activeProject?.id) { alert('Projeto não selecionado.'); return; }
-    clearTimeout(autoSaveTimer.current);
-    setIsSubmitting(true);
-    const isNewProcess = !current.supabase_id || current.supabase_id.startsWith('p');
-    try {
-      const { supabase_id, setor_id } = await salvarProcesso(activeProject.id, current);
-      setProcesses(prev => prev.map(p => p.id === current.id ? { ...p, supabase_id, setor_id, id: supabase_id } : p));
-      setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }));
-      setActiveProcessId(supabase_id);
-
-      // Sincroniza processo novo com Monday.com (fire-and-forget)
-      if (isNewProcess && current.name?.trim() && activeProject.mondayBoardId) {
-        fetch('/api/monday', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token ?? ''}`,
-          },
-          body: JSON.stringify({
-            action: 'adicionar_processo',
-            boardId: activeProject.mondayBoardId,
-            processoNome: current.name.trim(),
-          }),
-        }).catch(() => {});
-      }
-    } catch (err) { alert('❌ ' + err.message); }
-    finally { setIsSubmitting(false); }
-  };
-
-  const excluirProcesso = async () => {
-    if (!window.confirm(`Excluir o processo "${current.name}"?\n\nEsta ação não pode ser desfeita.`)) return;
-    clearTimeout(autoSaveTimer.current);
-    const isNew = !current.supabase_id || current.supabase_id.startsWith('p');
-    if (!isNew) {
-      try { await deletarProcesso(current.supabase_id); }
-      catch (err) { alert('❌ ' + err.message); return; }
-    }
-    const remaining = processes.filter(p => p.id !== current.id);
-    if (remaining.length === 0) {
-      const newId = `p${Date.now()}`;
-      setProcesses([{ ...defaultProcess, id: newId }]);
-      setActiveProcessId(newId);
-    } else {
-      setProcesses(remaining);
-      setActiveProcessId(remaining[0].id);
-    }
-    setSyncStatus(prev => { const s = { ...prev }; delete s[current.id]; return s; });
-  };
-
-  const upd   = (f, v) => { markDraft(); const u = [...processes]; u[activeProcessIndex][f] = v; setProcesses(u); };
-  const updRasci = (l, tags) => { markDraft(); const u = [...processes]; u[activeProcessIndex].rasci[l] = tags; setProcesses(u); };
-
-  const handleVinculoAdd = (newVinculo) => {
-    setVinculos(prev => [...prev, newVinculo]);
-  };
-  const handleVinculoRemove = (vinculoId) => {
-    setVinculos(prev => prev.filter(v => v.id !== vinculoId));
-    removeVinculo(vinculoId).catch(() => {
-      const sid = current.supabase_id;
-      if (sid && !String(sid).startsWith('p')) getVinculos(sid).then(setVinculos).catch(() => {});
-    });
-  };
-  const handleChipRemove = (colKey, chip) => {
-    const cfg = VINCULO_CFG[colKey];
-    const sid = current.supabase_id;
-    if (!cfg || !sid || String(sid).startsWith('p')) return;
-    setVinculos(prev => prev.filter(v =>
-      !(cfg.tiposLimpar.includes(v.tipo) && (v.de === chip || v.para === chip))
-    ));
-    removeVinculosByChip(sid, cfg.tiposLimpar, chip).catch(() => {});
-  };
-
-  // ── Helpers de resposta do cliente ───────────
-  const getRC = () => {
-    const rc = current.respostas_cliente;
-    return (rc && Object.keys(rc).length > 0) ? rc : buildEmptyClienteResposta(current);
-  };
-  const updCI  = (name, field, val) => { const rc = getRC(); upd('respostas_cliente', { ...rc, inputs:  { ...rc.inputs,  [name]: { ...rc.inputs[name],  [field]: val } } }); };
-  const updCO  = (name, field, val) => { const rc = getRC(); upd('respostas_cliente', { ...rc, outputs: { ...rc.outputs, [name]: { ...rc.outputs[name], [field]: val } } }); };
-  const updCP  = (field, val)       => { const rc = getRC(); upd('respostas_cliente', { ...rc, processo: { ...rc.processo, [field]: val } }); };
-  const updCR  = (papel, tags)      => { const rc = getRC(); upd('respostas_cliente', { ...rc, processo: { ...rc.processo, rasci: { ...rc.processo.rasci, [papel]: tags } } }); };
-  const togCI  = (name) => setClienteExpInputs( p => ({ ...p, [name]: !p[name] }));
-  const togCO  = (name) => setClienteExpOutputs(p => ({ ...p, [name]: !p[name] }));
-  const updArr   = (f, i, v) => { markDraft(); const u = [...processes]; u[activeProcessIndex][f][i] = v; setProcesses(u); };
-  const rmArr    = (f, i)    => { markDraft(); const u = [...processes]; if (u[activeProcessIndex][f].length > 1) { u[activeProcessIndex][f].splice(i,1); setProcesses(u); } };
-  const addArr   = (f)       => { markDraft(); const u = [...processes]; u[activeProcessIndex][f] = [...u[activeProcessIndex][f], '']; setProcesses(u); };
+  }, [appMode, session?.user?.id]); // eslint-disable-line
 
   // ─────────────────────────────────────────────
   // Roteamento
@@ -2912,4 +2568,18 @@ function AddNotifToSipocForm({ notif, activeProject, onConfirm, onCancel }) {
   );
 }
 
-export default App;
+// ─────────────────────────────────────────────────────────────────
+// App — providers wrapper
+// ─────────────────────────────────────────────────────────────────
+
+export default function App() {
+  return (
+    <ProjectProvider>
+      <BuilderProvider>
+        <AgendamentoProvider>
+          <AppInner />
+        </AgendamentoProvider>
+      </BuilderProvider>
+    </ProjectProvider>
+  );
+}

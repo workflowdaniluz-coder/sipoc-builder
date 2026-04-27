@@ -357,26 +357,18 @@ export async function atualizarResponsavelSetor(setorId, responsavel) {
   if (error) throw new Error('Erro ao atualizar responsável: ' + error.message)
 }
 
-async function obterOuCriarSetor(clienteId, nomeSetor) {
+// DEPRECATED: obterOuCriarSetor criava setores silenciosamente, causando duplicatas.
+// Substituído por obterSetorOuFalhar que exige que o setor já exista (reforçado pela
+// constraint UNIQUE(cliente_id, nome) na tabela setores).
+async function obterSetorOuFalhar(clienteId, nomeSetor) {
   const { data: existing } = await supabase
     .from('setores')
     .select('id')
     .eq('cliente_id', clienteId)
     .eq('nome', nomeSetor)
     .maybeSingle()
-
-  if (existing) return existing.id
-
-  const { data: { user } } = await supabase.auth.getUser()
-
-  const { data: novo, error } = await supabase
-    .from('setores')
-    .insert({ cliente_id: clienteId, consultor_id: user.id, nome: nomeSetor })
-    .select('id')
-    .single()
-
-  if (error) throw new Error(`Erro ao criar setor "${nomeSetor}": ` + error.message)
-  return novo.id
+  if (!existing) throw new Error(`Setor "${nomeSetor}" não encontrado. Crie o setor antes de adicionar processos.`)
+  return existing.id
 }
 
 // ──────────────────────────────────────────────
@@ -459,7 +451,7 @@ export async function salvarProcesso(clienteId, processo) {
   const { data: { user } } = await supabase.auth.getUser()
 
   const setorId = processo.setor_id
-    ?? (await obterOuCriarSetor(clienteId, processo.setor || 'Geral'))
+    ?? (await obterSetorOuFalhar(clienteId, processo.setor || 'Geral'))
 
   const payload = {
     setor_id: setorId,

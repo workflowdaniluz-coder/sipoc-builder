@@ -8,6 +8,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { logEvent, logError } from './_lib/logger.js'
 
 const ORIGIN = process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
@@ -351,13 +352,15 @@ async function handlePost(req, res) {
   try {
     respostaBruta = await chamarGemini(systemPrompt, historico)
   } catch (err) {
-    console.error('[levantamento-chat] Gemini error:', err.message)
+    logError('gemini.error', err, { sipocId })
     return res.status(500).json({ ok: false, error: 'Erro ao chamar o assistente. Tente novamente.' })
   }
 
   // 4. Detecta conclusão
   const concluido = respostaBruta.includes('<CONCLUIDO>')
   const respostaLimpa = respostaBruta.replace('<CONCLUIDO>', '').trim()
+
+  logEvent('gemini.response', { sipocId, concluido, tokens: respostaBruta.length })
 
   // 5. Salva resposta do agente
   await supabase.from('levantamento_conversa').insert({ sipoc_id: sipocId, role: 'assistant', conteudo: respostaLimpa })
@@ -382,6 +385,8 @@ async function handlePost(req, res) {
   }).eq('id', sipocId)
 
   const clienteId = sipoc.setores?.clientes?.id
+  logEvent('levantamento.concluido', { sipocId, clienteId: clienteId ?? null })
+
   if (clienteId) {
     await supabase.from('notifications').insert({
       project_id: clienteId,
