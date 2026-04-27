@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { listarSipocs, salvarRespostaCliente, finalizarRespostaCliente } from '../lib/db';
-import LevantamentoChat from './LevantamentoChat';
+
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -712,9 +712,6 @@ export default function ClientView({ clientData }) {
                   />
                 </div>
               </SectionCard>
-
-              {/* ── Section 4: Levantamento de processo (chat IA) ── */}
-              <LevantamentoChat sipocId={activeProcessoId} token={token} />
 
               {/* ── Save bar ── */}
               <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-8 py-5 mb-8 space-y-4">
