@@ -12,7 +12,7 @@ import { logEvent, logError } from './_lib/logger.js'
 
 const ORIGIN = process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
-const GEMINI_MODEL = 'gemini-2.5-flash'
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash']
 
 // ── Token validation ──────────────────────────────────────────────
 
@@ -98,10 +98,8 @@ IMPORTANTE: O JSON deve sempre refletir o estado ACUMULADO de toda a conversa at
 
 // ── Call Gemini ───────────────────────────────────────────────────
 
-async function callGemini(systemPrompt, historico) {
-  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não configurada.')
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`
+async function callGeminiModel(model, systemPrompt, historico) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`
 
   const contents = historico.map(m => ({
     role: m.role === 'agent' ? 'model' : 'user',
@@ -121,14 +119,38 @@ async function callGemini(systemPrompt, historico) {
   })
 
   if (!resp.ok) {
-    const err = await resp.text()
-    throw new Error(`Gemini erro ${resp.status}: ${err}`)
+    const errText = await resp.text()
+    const err = new Error(`Gemini erro ${resp.status}`)
+    err.status = resp.status
+    err.body = errText
+    throw err
   }
 
   const json = await resp.json()
   const text = json.candidates?.[0]?.content?.parts?.[0]?.text
   if (!text) throw new Error('Resposta vazia do Gemini.')
   return text
+}
+
+async function callGemini(systemPrompt, historico) {
+  if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY não configurada.')
+
+  for (const model of GEMINI_MODELS) {
+    let lastErr
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await callGeminiModel(model, systemPrompt, historico)
+      } catch (err) {
+        lastErr = err
+        if (err.status !== 503 && err.status !== 429) throw err
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+      }
+    }
+    // 503/429 exhausted for this model — try next
+    logError('cliente_chat.gemini_fallback', lastErr, { model })
+  }
+
+  throw new Error('O assistente está temporariamente indisponível. Tente novamente em alguns instantes.')
 }
 
 // ── Parse Gemini response ─────────────────────────────────────────
@@ -286,7 +308,7 @@ export default async function handler(req, res) {
       respostaRaw = await callGemini(systemPrompt, historico)
     } catch (err) {
       logError('cliente_chat.gemini_error', err, { tokenId: tokenData.id })
-      return res.status(500).json({ ok: false, error: err.message })
+      return res.status(500).json({ ok: false, error: err.message ?? 'Erro ao processar resposta. Tente novamente.' })
     }
 
     const { mensagem: respostaTexto, estado } = parseResposta(respostaRaw)
