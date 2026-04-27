@@ -1036,19 +1036,24 @@ function App() {
   };
 
   const handleCriarSetor = async () => {
-    const nome = novoSetorNome.trim() || 'Geral';
-    if (!activeProject?.id) return;
+    const nome = novoSetorNome.trim();
+    if (!nome || !activeProject?.id) return;
     try {
       const setor = await criarSetor(activeProject.id, nome, novoSetorResp || null);
-      const newId = `p${Date.now()}`;
-      setProcesses(prev => [...prev, {
-        ...defaultProcess, id: newId, supabase_id: null,
-        name: 'Novo Processo', setor: setor.nome, setor_id: setor.id,
-      }]);
       if (novoSetorResp) setSetorResponsavel(prev => ({ ...prev, [setor.id]: novoSetorResp }));
-      setActiveProcessId(newId);
       setNovoSetorModal(false); setNovoSetorNome(''); setNovoSetorResp('');
+      carregarDetalhes(activeProject.id);
     } catch (err) { alert('❌ ' + err.message); }
+  };
+
+  const handleAdicionarProcesso = () => {
+    if (!activeSetor?.id) return;
+    const newId = `p${Date.now()}`;
+    setProcesses(prev => [...prev, {
+      ...defaultProcess, id: newId, supabase_id: null,
+      name: 'Novo Processo', setor: activeSetor.nome, setor_id: activeSetor.id,
+    }]);
+    setActiveProcessId(newId);
   };
 
   const activeProcessIndex = processes.findIndex(p => p.id === activeProcessId);
@@ -1945,9 +1950,9 @@ function App() {
                     );
                   })
                 )}
-                {mode === 'consultant' && (
+                {mode === 'consultant' && activeSetor && (
                   <button
-                    onClick={() => setNovoSetorModal(true)}
+                    onClick={handleAdicionarProcesso}
                     className="w-full py-2 rounded-xl border-2 border-dashed border-slate-200 text-xs font-semibold
                                text-slate-400 hover:text-[#ecbf03] hover:border-[#ecbf03]/50 transition-all mt-2">
                     + Processo
@@ -2017,16 +2022,8 @@ function App() {
                   {/* ── Modo Consultor: metadata + colunas ── */}
                   {mode === 'consultant' && (
                     <>
-                      {/* Metadata bar: Área Executora, Tipo, Impacto */}
-                      <div className="grid grid-cols-3 gap-4 mb-6 p-5 bg-slate-50 rounded-2xl border border-slate-200">
-                        <div>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Área Executora</p>
-                          <input type="text" value={current.setor}
-                            onChange={e => upd('setor', e.target.value)}
-                            placeholder="Ex: Financeiro"
-                            className="w-full px-3 py-2 rounded-lg border border-slate-200 bg-white text-sm font-medium
-                                       text-slate-700 outline-none focus:border-[#ecbf03] focus:ring-2 focus:ring-[#ecbf03]/20 transition-all" />
-                        </div>
+                      {/* Metadata bar: Tipo, Impacto */}
+                      <div className="grid grid-cols-2 gap-4 mb-6 p-5 bg-slate-50 rounded-2xl border border-slate-200">
                         <div>
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Tipo do Processo</p>
                           <select value={current.tipo} onChange={e => upd('tipo', e.target.value)}
