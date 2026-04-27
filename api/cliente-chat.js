@@ -286,7 +286,7 @@ export default async function handler(req, res) {
       respostaRaw = await callGemini(systemPrompt, historico)
     } catch (err) {
       logError('cliente_chat.gemini_error', err, { tokenId: tokenData.id })
-      return res.status(500).json({ ok: false, error: 'Erro ao processar resposta. Tente novamente.' })
+      return res.status(500).json({ ok: false, error: err.message })
     }
 
     const { mensagem: respostaTexto, estado } = parseResposta(respostaRaw)
