@@ -2048,7 +2048,7 @@ function App() {
                       </div>
 
                       {/* SIPOC grid */}
-                      <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr 1.2fr 1fr 1fr' }}>
+                      <div className="grid gap-3 mb-5" style={{ gridTemplateColumns: '1fr 1fr 1.2fr 1fr 1fr' }}>
                         {SIPOC_COLS.slice(0,2).map(col => (
                           <SIPOCColumn key={col.key} col={col} items={current[col.key]}
                             globalOutputs={globalOutputs}
@@ -2101,6 +2101,20 @@ function App() {
                             setOpenPopoverKey={setOpenPopoverKey}
                           />
                         ))}
+                      </div>
+
+                      {/* Pontos de atenção */}
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                        <p className="text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-2">Pontos de atenção</p>
+                        <textarea
+                          rows={3}
+                          value={current.observacoes || ''}
+                          onChange={e => upd('observacoes', e.target.value)}
+                          placeholder="Registre gargalos, riscos, inconsistências ou qualquer observação relevante sobre este processo…"
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-amber-200 bg-white text-sm text-slate-700
+                                     outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200 transition-all
+                                     resize-none placeholder:text-slate-400"
+                        />
                       </div>
                     </>
                   )}
