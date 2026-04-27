@@ -16,7 +16,7 @@ import BpmnTab from './components/BpmnTab';
 import BpmnValidacaoSetorView, { ErroTokenView } from './components/BpmnValidacaoSetorView';
 import FormularioContatosView from './components/FormularioContatosView';
 import AgendarView from './components/AgendarView';
-import ClientView from './components/ClientView';
+import ClientChat from './components/ClientChat';
 import { ProjectProvider, useProject } from './contexts/ProjectContext';
 import { BuilderProvider, useBuilder } from './contexts/BuilderContext';
 import { AgendamentoProvider, useAgendamento } from './contexts/AgendamentoContext';
@@ -891,7 +891,7 @@ function AppInner() {
     );
   }
 
-  if (appMode === 'client') return <ClientView clientData={clientData} />;
+  if (appMode === 'client') return <ClientChat token={clientData?.token} />;
 
   if (appMode === 'validacao_bpmn') return <BpmnValidacaoView validacaoData={validacaoData} />;
 
