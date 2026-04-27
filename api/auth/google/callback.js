@@ -3,7 +3,7 @@
  * Troca o code por tokens, criptografa refresh_token, faz UPSERT e redireciona.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getAdminClient } from '../../_lib/supabase-admin.js'
 import { verifyState, encrypt } from '../../_lib/crypto.js'
 
 function redirect(res, status) {
@@ -100,7 +100,7 @@ export default async function handler(req, res) {
   }
 
   // UPSERT em consultor_google_auth (service role bypassa RLS)
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = getAdminClient()
   const { error: upsertError } = await supabase
     .from('consultor_google_auth')
     .upsert({

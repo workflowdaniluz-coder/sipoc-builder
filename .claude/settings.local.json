@@ -24,7 +24,15 @@
       "Bash(claude plugin:*)",
       "WebSearch",
       "Bash(npx vite *)",
-      "Bash(curl -s http://localhost:5173 -o /dev/null -w \"%{http_code}\")"
+      "Bash(curl -s http://localhost:5173 -o /dev/null -w \"%{http_code}\")",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__supabase__execute_sql",
+      "Bash(sed -n '96p' src/components/AgendarView.jsx)",
+      "Bash(sed -n '103,113p' src/components/AgendarView.jsx)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)"
     ]
   }
 }

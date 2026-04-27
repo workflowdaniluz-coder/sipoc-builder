@@ -154,10 +154,10 @@ export function BuilderProvider({ children }) {
       setSyncStatus(prev => ({ ...prev, [supabase_id]: 'synced' }))
       setActiveProcessId(supabase_id)
       if (isNewProcess && current.name?.trim() && proj.mondayBoardId) {
-        fetch('/api/monday', {
+        fetch('/api/monday/adicionar-processo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sess?.access_token ?? ''}` },
-          body: JSON.stringify({ action: 'adicionar_processo', boardId: proj.mondayBoardId, processoNome: current.name.trim() }),
+          body: JSON.stringify({ boardId: proj.mondayBoardId, processoNome: current.name.trim() }),
         }).catch(() => {})
       }
     } catch (err) { alert('❌ ' + err.message) }

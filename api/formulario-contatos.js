@@ -1,9 +1,4 @@
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-)
+import { getAdminClient } from './_lib/supabase-admin.js'
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
@@ -11,15 +6,12 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   if (req.method === 'OPTIONS') return res.status(200).end()
 
+  const supabase = getAdminClient()
+
   // GET ?cf=TOKEN — valida token e retorna nome do cliente
   if (req.method === 'GET') {
     const token = req.query.cf
     if (!token) return res.status(400).json({ ok: false, error: 'Token não informado.' })
-
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      console.error('[formulario-contatos] Env vars SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configuradas.')
-      return res.status(503).json({ ok: false, error: 'Serviço não configurado (env vars ausentes).' })
-    }
 
     const { data, error } = await supabase
       .from('clientes')

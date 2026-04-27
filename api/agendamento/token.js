@@ -3,7 +3,7 @@
  * DELETE /api/agendamento/token?token=uuid → consultor cancela oferta (JWT auth)
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getAdminClient } from '../_lib/supabase-admin.js'
 import { getAccessTokenForConsultor } from '../_lib/google-auth.js'
 import { deleteHoldEvent, confirmHoldEvent } from '../_lib/google-calendar.js'
 
@@ -32,7 +32,7 @@ async function handleConfirmar(req, res) {
   if (!Array.isArray(slots_escolhidos) || !slots_escolhidos.length)
     return res.status(400).json({ ok: false, error: 'slots_escolhidos obrigatório.' })
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = getAdminClient()
 
   const { data: row, error: fetchErr } = await supabase
     .from('tokens_agendamento')
@@ -119,7 +119,7 @@ async function handleCancelar(req, res) {
   const token = req.query.token
   if (!token) return res.status(400).json({ ok: false, error: 'Token obrigatório.' })
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = getAdminClient()
   const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt)
   if (authErr || !user) return res.status(401).json({ ok: false, error: 'Token inválido.' })
 

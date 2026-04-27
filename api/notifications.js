@@ -19,15 +19,7 @@
  * }
  */
 
-import { createClient } from '@supabase/supabase-js'
-
-// Cria cliente com service role key para bypassar RLS no INSERT
-function getAdminClient() {
-  const url = process.env.SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios')
-  return createClient(url, key)
-}
+import { getAdminClient } from './_lib/supabase-admin.js'
 
 function unauthorized(res) {
   res.status(401).json({ success: false, error: 'Unauthorized' })

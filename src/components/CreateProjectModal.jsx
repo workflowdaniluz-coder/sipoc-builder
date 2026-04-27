@@ -90,13 +90,13 @@ export default function CreateProjectModal({ onClose, onCreated }) {
 
       // Cria pasta no Monday.com em background — não bloqueia o fluxo principal
       supabase.auth.getSession().then(({ data: { session } }) => {
-        fetch('/api/monday', {
+        fetch('/api/monday/criar-pasta', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${session?.access_token ?? ''}`,
           },
-          body: JSON.stringify({ action: 'criar_pasta', clienteNome: nome.trim() }),
+          body: JSON.stringify({ clienteNome: nome.trim() }),
         })
           .then(r => r.json())
           .then(d => {

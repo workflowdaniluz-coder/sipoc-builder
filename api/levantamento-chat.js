@@ -7,16 +7,12 @@
  *   Envia mensagem do cliente, chama Claude, retorna resposta do agente.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getAdminClient } from './_lib/supabase-admin.js'
 import { logEvent, logError } from './_lib/logger.js'
 
 const ORIGIN = process.env.APP_ORIGIN ?? 'https://app.p-excellence.com.br'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const GEMINI_MODEL = 'gemini-2.5-flash'
-
-function getSupabase() {
-  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
-}
 
 // ── Validação do token do cliente ─────────────────────────────────
 
@@ -279,7 +275,7 @@ async function handleGet(req, res) {
   const { token, sipocId, consultor } = req.query
   if (!sipocId) return res.status(400).json({ ok: false, error: 'sipocId obrigatório.' })
 
-  const supabase = getSupabase()
+  const supabase = getAdminClient()
   let setorId
 
   // Consultor autenticado via JWT (para visualização no builder)
@@ -330,7 +326,7 @@ async function handlePost(req, res) {
 
   if (!GEMINI_API_KEY) return res.status(500).json({ ok: false, error: 'GEMINI_API_KEY não configurada.' })
 
-  const supabase = getSupabase()
+  const supabase = getAdminClient()
   const acesso = await validarToken(supabase, token)
   if (!acesso) return res.status(401).json({ ok: false, error: 'Token inválido ou expirado.' })
 

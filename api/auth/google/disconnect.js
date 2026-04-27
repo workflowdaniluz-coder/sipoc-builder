@@ -3,7 +3,7 @@
  * Revoga token no Google e marca revogado_em no banco.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getAdminClient } from '../../_lib/supabase-admin.js'
 import { decrypt } from '../../_lib/crypto.js'
 
 export default async function handler(req, res) {
@@ -18,7 +18,7 @@ export default async function handler(req, res) {
   const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null
   if (!jwt) return res.status(401).json({ ok: false, error: 'Não autorizado.' })
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = getAdminClient()
 
   const { data: { user }, error: authError } = await supabase.auth.getUser(jwt)
   if (authError || !user) return res.status(401).json({ ok: false, error: 'Token inválido.' })

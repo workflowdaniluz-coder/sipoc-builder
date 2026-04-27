@@ -4,7 +4,7 @@
  * → persiste token_agendamento → retorna link pro cliente.
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getAdminClient } from '../_lib/supabase-admin.js'
 import { getAccessTokenForConsultor } from '../_lib/google-auth.js'
 import { createHoldEvent, deleteHoldEvent } from '../_lib/google-calendar.js'
 
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   const jwt = (req.headers['authorization'] ?? '').replace(/^Bearer\s+/, '').trim()
   if (!jwt) return res.status(401).json({ ok: false, error: 'Não autorizado.' })
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = getAdminClient()
   const { data: { user }, error: authErr } = await supabase.auth.getUser(jwt)
   if (authErr || !user) return res.status(401).json({ ok: false, error: 'Token inválido.' })
 

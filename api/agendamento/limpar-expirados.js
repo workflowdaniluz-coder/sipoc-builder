@@ -4,7 +4,7 @@
  * Protegido por Authorization: Bearer {NOTIFICATIONS_API_KEY}
  */
 
-import { createClient } from '@supabase/supabase-js'
+import { getAdminClient } from '../_lib/supabase-admin.js'
 import { getAccessTokenForConsultor } from '../_lib/google-auth.js'
 import { deleteHoldEvent } from '../_lib/google-calendar.js'
 
@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   if (!key || key !== process.env.NOTIFICATIONS_API_KEY)
     return res.status(401).json({ ok: false, error: 'Não autorizado.' })
 
-  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  const supabase = getAdminClient()
 
   const { data: expirados, error } = await supabase
     .from('tokens_agendamento')

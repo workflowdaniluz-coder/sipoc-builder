@@ -674,7 +674,7 @@ function AppInner() {
       const validacaoToken = params.get('vt');
       if (validacaoToken) {
         try {
-          const resp = await fetch(`/api/validar-bpmn?token=${encodeURIComponent(validacaoToken)}`);
+          const resp = await fetch(`/api/validar-bpmn/processo?token=${encodeURIComponent(validacaoToken)}`);
           const data = await resp.json();
           if (data.ok && data.processo) {
             window.history.replaceState({}, '', window.location.pathname);
@@ -711,7 +711,7 @@ function AppInner() {
       if (vbToken) {
         window.history.replaceState({}, '', window.location.pathname);
         try {
-          const resp = await fetch(`/api/validar-bpmn?vb=${encodeURIComponent(vbToken)}`);
+          const resp = await fetch(`/api/validar-bpmn/setor?vb=${encodeURIComponent(vbToken)}`);
           const data = await resp.json();
           if (data.ok) {
             setValidacaoSetorData({ ...data });
