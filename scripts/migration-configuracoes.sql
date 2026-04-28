@@ -1,4 +1,33 @@
-const PROMPT_FALLBACK = `Você é um assistente da P-Excellence conduzindo um levantamento de processos com um colaborador do cliente.
+-- Migration: configuracoes
+-- Tabela genérica de configurações editáveis sem deploy.
+-- Prompt do agente de chat usa {{EMPRESA}}, {{SETOR}}, {{PROCESSOS}} como placeholders.
+
+CREATE TABLE IF NOT EXISTS configuracoes (
+  chave        text        PRIMARY KEY,
+  valor        text        NOT NULL,
+  atualizado_em timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE configuracoes ENABLE ROW LEVEL SECURITY;
+
+-- Trigger para atualizar atualizado_em automaticamente
+CREATE OR REPLACE FUNCTION update_configuracoes_atualizado_em()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.atualizado_em = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_configuracoes_atualizado ON configuracoes;
+CREATE TRIGGER trg_configuracoes_atualizado
+  BEFORE UPDATE ON configuracoes
+  FOR EACH ROW EXECUTE FUNCTION update_configuracoes_atualizado_em();
+
+-- Prompt inicial do agente de levantamento de processos
+INSERT INTO configuracoes (chave, valor) VALUES (
+  'cliente_chat_prompt',
+  $PROMPT$Você é um assistente da P-Excellence conduzindo um levantamento de processos com um colaborador do cliente.
 
 EMPRESA: {{EMPRESA}}
 SETOR: {{SETOR}}
@@ -49,41 +78,5 @@ FORMATO DE RESPOSTA — obrigatório, sempre dois blocos separados por ---JSON_S
 }
 ---END_JSON---
 
-IMPORTANTE: O JSON deve sempre refletir o estado ACUMULADO de toda a conversa até agora — não apenas a última resposta. Quando "concluido" for true, todos os processos foram mapeados.`
-
-let _template = null
-let _cachedAt = 0
-const TTL_MS = 5 * 60 * 1000
-
-async function loadTemplate(supabase) {
-  if (_template && Date.now() - _cachedAt < TTL_MS) return _template
-  try {
-    const { data } = await supabase
-      .from('configuracoes')
-      .select('valor')
-      .eq('chave', 'cliente_chat_prompt')
-      .single()
-    _template = data?.valor ?? PROMPT_FALLBACK
-  } catch {
-    _template = PROMPT_FALLBACK
-  }
-  _cachedAt = Date.now()
-  return _template
-}
-
-export async function buildSystemPrompt(supabase, clienteNome, setorNome, processos) {
-  const listaProcessos = processos.map((p, i) => {
-    const inputs = (p.inputs || []).filter(s => s.trim())
-    const outputs = (p.outputs || []).filter(s => s.trim())
-    return `
-Processo ${i + 1}: "${p.name}" (id: ${p.id})
-  Entradas definidas: ${inputs.length ? inputs.join(', ') : 'nenhuma'}
-  Saídas definidas: ${outputs.length ? outputs.join(', ') : 'nenhuma'}`
-  }).join('\n')
-
-  const template = await loadTemplate(supabase)
-  return template
-    .replace('{{EMPRESA}}', clienteNome)
-    .replace('{{SETOR}}', setorNome)
-    .replace('{{PROCESSOS}}', listaProcessos)
-}
+IMPORTANTE: O JSON deve sempre refletir o estado ACUMULADO de toda a conversa até agora — não apenas a última resposta. Quando "concluido" for true, todos os processos foram mapeados.$PROMPT$
+) ON CONFLICT (chave) DO NOTHING;

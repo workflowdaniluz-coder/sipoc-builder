@@ -237,7 +237,7 @@ export default async function handler(req, res) {
     ]
 
     // Call Gemini
-    const systemPrompt = buildSystemPrompt(tokenData.cliente_nome, tokenData.setor_nome, processos)
+    const systemPrompt = await buildSystemPrompt(supabase, tokenData.cliente_nome, tokenData.setor_nome, processos)
     let respostaRaw
     try {
       respostaRaw = await callGemini(systemPrompt, historico)
