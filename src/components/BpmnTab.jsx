@@ -274,9 +274,10 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
   const [dataPrev,    setDataPrev]    = useState(sipoc.bpmn_data_prevista ?? '')
   const [responsavel, setResponsavel] = useState(sipoc.bpmn_responsavel ?? '')
   const [savedOk,     setSavedOk]     = useState(false)
-  const isRunning = faseAtiva?.status === 'em_andamento'
-  const isPaused  = faseAtiva?.status === 'pausado'
-  const proxima   = FASE_PROXIMA[faseAtual]
+  const isRunning    = faseAtiva?.status === 'em_andamento'
+  const isPaused     = faseAtiva?.status === 'pausado'
+  const temConcluido = (faseRows ?? []).some(r => r.status === 'concluido')
+  const proxima      = FASE_PROXIMA[faseAtual]
 
   const wrap = async (fn) => {
     setLoading(true)
@@ -443,9 +444,9 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
       {faseCfg.hasTimer && (
         <div className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3">
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full
-            ${isRunning ? 'bg-green-100 text-green-700' : isPaused ? 'bg-amber-100 text-amber-700' : faseAtiva?.status === 'concluido' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}
+            ${isRunning ? 'bg-green-100 text-green-700' : isPaused ? 'bg-amber-100 text-amber-700' : temConcluido ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}
           >
-            {isRunning ? 'Em andamento' : isPaused ? 'Pausado' : faseAtiva?.status === 'concluido' ? 'Concluído' : 'Não iniciado'}
+            {isRunning ? 'Em andamento' : isPaused ? 'Pausado' : temConcluido ? 'Concluído' : 'Não iniciado'}
           </span>
           <div className="flex items-center gap-2">
             {(!faseAtiva || faseAtiva.status === 'concluido') && (
