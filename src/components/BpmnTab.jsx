@@ -263,7 +263,7 @@ function ModalHistorico({ sipoc, rows, onClose }) {
 
 // ── ProcessCard ───────────────────────────────────────────────────────────────
 
-function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate, onParecer, onHistorico }) {
+function ProcessCard({ sipoc, setorNome, faseRows, consultorId, onFaseUpdate, onSipocUpdate, onParecer, onHistorico }) {
   const faseAtual = sipoc.bpmn_fase_atual ?? 'mapeamento_as_is'
   const faseCfg   = FASE_CFG[faseAtual] ?? FASE_CFG.mapeamento_as_is
   const faseAtiva = getFaseAtiva(faseRows)
@@ -348,9 +348,11 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-slate-800 text-sm leading-tight truncate">{sipoc.nome_processo}</p>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${faseCfg.cor}`}>
-              {faseCfg.label}
-            </span>
+            {setorNome && (
+              <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                {setorNome}
+              </span>
+            )}
             {sipoc.bpmn_data_prevista && (
               <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
                 📅 {new Date(sipoc.bpmn_data_prevista + 'T00:00:00').toLocaleDateString('pt-BR')}
@@ -686,23 +688,15 @@ function ContestacaoCard({ contestacao, consultorId, onDecidido }) {
   )
 }
 
-// ── SetorGroup ────────────────────────────────────────────────────────────────
+// ── ValidacaoSetorPanel ───────────────────────────────────────────────────────
 
-function SetorGroup({ setorNome, setorId, processos, fasesMap, consultorId, onFaseUpdate, onSipocUpdate, onParecer, onHistorico }) {
-  const [expanded,   setExpanded]   = useState(true)
-  const [token,      setToken]      = useState(undefined) // undefined=loading, null=sem token
+function ValidacaoSetorPanel({ setorNome, setorId }) {
+  const [token,      setToken]      = useState(undefined)
   const [tokenLoad,  setTokenLoad]  = useState(true)
   const [generating, setGenerating] = useState(false)
   const [revoking,   setRevoking]   = useState(false)
   const [copied,     setCopied]     = useState(false)
 
-  const concluidos        = processos.filter(p => p.bpmn_fase_atual === 'concluido').length
-  const emValidacao       = processos.filter(p => p.bpmn_fase_atual === 'validacao').length
-  const processosAtivos   = processos.filter(p => p.bpmn_fase_atual !== 'concluido')
-  const todosEmValidacao  = processosAtivos.length > 0 && processosAtivos.every(p => p.bpmn_fase_atual === 'validacao')
-  const podeGerarLink     = todosEmValidacao && !!setorId
-
-  // Carregar token ativo ao montar
   useEffect(() => {
     if (!setorId) { setTokenLoad(false); setToken(null); return }
     getTokenValidacaoBpmnBySetor(setorId)
@@ -739,6 +733,67 @@ function SetorGroup({ setorNome, setorId, processos, fasesMap, consultorId, onFa
   }
 
   return (
+    <div className="flex items-center justify-between gap-3 mb-3 px-1">
+      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{setorNome}</span>
+      <div className="flex items-center gap-2">
+        {tokenLoad ? (
+          <span className="text-[10px] text-slate-400">Verificando…</span>
+        ) : token ? (
+          <>
+            <span className="text-[10px] text-amber-600 font-semibold">
+              Link ativo · expira {new Date(token.expira_em).toLocaleDateString('pt-BR')}
+            </span>
+            <button
+              onClick={handleCopy}
+              className="px-2.5 py-1 rounded-lg border border-slate-200 text-[10px] font-semibold
+                text-slate-600 hover:bg-slate-50 bg-white transition-all"
+            >
+              {copied ? '✅ Copiado' : 'Copiar'}
+            </button>
+            <button
+              onClick={handleRevogar}
+              disabled={revoking}
+              className="px-2.5 py-1 rounded-lg border border-red-200 text-[10px] font-semibold
+                text-red-500 hover:bg-red-50 bg-white transition-all disabled:opacity-50"
+            >
+              Revogar
+            </button>
+          </>
+        ) : setorId ? (
+          <button
+            onClick={handleGerar}
+            disabled={generating}
+            className="px-3 py-1 rounded-lg bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e]
+              font-bold text-[10px] transition-all disabled:opacity-50"
+          >
+            {generating ? 'Gerando…' : 'Gerar link de validação'}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+// ── FaseSection ───────────────────────────────────────────────────────────────
+
+const FASE_ORDER = ['mapeamento_as_is', 'revisao', 'retrabalho', 'validacao', 'concluido']
+
+function FaseSection({ fase, processos, fasesMap, consultorId, onFaseUpdate, onSipocUpdate, onParecer, onHistorico }) {
+  const faseCfg = FASE_CFG[fase] ?? FASE_CFG.mapeamento_as_is
+  const [expanded, setExpanded] = useState(fase !== 'concluido')
+
+  if (processos.length === 0) return null
+
+  const setorGroups = fase === 'validacao'
+    ? Object.entries(processos.reduce((acc, p) => {
+        const k = p.setor_nome ?? 'Geral'
+        if (!acc[k]) acc[k] = { setorId: p.setor_id ?? null, processos: [] }
+        acc[k].processos.push(p)
+        return acc
+      }, {}))
+    : null
+
+  return (
     <div className="rounded-2xl border border-slate-200 overflow-hidden">
       <button
         type="button"
@@ -746,20 +801,12 @@ function SetorGroup({ setorNome, setorId, processos, fasesMap, consultorId, onFa
         className="w-full flex items-center justify-between px-5 py-4 bg-slate-50 hover:bg-slate-100 transition-all text-left"
       >
         <div className="flex items-center gap-3">
-          <span className="font-bold text-slate-700 text-sm">{setorNome}</span>
+          <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${faseCfg.cor}`}>
+            {faseCfg.label}
+          </span>
           <span className="text-[10px] font-semibold text-slate-400 bg-slate-200 px-2 py-0.5 rounded-full">
             {processos.length} {processos.length === 1 ? 'processo' : 'processos'}
           </span>
-          {concluidos > 0 && (
-            <span className="text-[10px] font-semibold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
-              {concluidos} concluído{concluidos > 1 ? 's' : ''}
-            </span>
-          )}
-          {emValidacao > 0 && (
-            <span className="text-[10px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-              {emValidacao} em validação
-            </span>
-          )}
         </div>
         <svg
           className={`w-4 h-4 text-slate-400 transition-transform flex-shrink-0 ${expanded ? 'rotate-180' : ''}`}
@@ -769,73 +816,43 @@ function SetorGroup({ setorNome, setorId, processos, fasesMap, consultorId, onFa
         </svg>
       </button>
 
-      {/* Painel de link de validação — visível quando há processos em validação */}
-      {podeGerarLink && (
-        <div className="px-5 py-3 bg-amber-50 border-t border-amber-100">
-          {tokenLoad ? (
-            <p className="text-xs text-slate-400">Verificando link…</p>
-          ) : token ? (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <svg className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                <p className="text-xs font-semibold text-amber-700">Link ativo</p>
-                <p className="text-[10px] text-amber-600">
-                  expira {new Date(token.expira_em).toLocaleDateString('pt-BR')}
-                </p>
-              </div>
-              <p className="font-mono text-[10px] text-slate-500 bg-white px-2.5 py-1.5 rounded-lg truncate border border-slate-200">
-                {token.url}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCopy}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold
-                    text-slate-600 hover:bg-slate-50 bg-white transition-all"
-                >
-                  {copied ? '✅ Copiado' : 'Copiar'}
-                </button>
-                <button
-                  onClick={handleRevogar}
-                  disabled={revoking}
-                  className="px-3 py-1.5 rounded-lg border border-red-200 text-xs font-semibold
-                    text-red-500 hover:bg-red-50 bg-white transition-all disabled:opacity-50"
-                >
-                  Revogar
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              onClick={handleGerar}
-              disabled={generating}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02]
-                text-[#16253e] font-bold text-xs transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-              {generating ? 'Gerando…' : 'Gerar link de validação'}
-            </button>
-          )}
-        </div>
-      )}
-
       {expanded && (
         <div className="p-4 space-y-3 bg-white">
-          {processos.map(sipoc => (
-            <ProcessCard
-              key={sipoc.id}
-              sipoc={sipoc}
-              faseRows={fasesMap[sipoc.id] ?? []}
-              consultorId={consultorId}
-              onFaseUpdate={onFaseUpdate}
-              onSipocUpdate={onSipocUpdate}
-              onParecer={onParecer}
-              onHistorico={onHistorico}
-            />
-          ))}
+          {setorGroups ? (
+            setorGroups.map(([setorNome, { setorId, processos: setorProcs }]) => (
+              <div key={setorNome}>
+                <ValidacaoSetorPanel setorNome={setorNome} setorId={setorId} />
+                {setorProcs.map(sipoc => (
+                  <div key={sipoc.id} className="mb-3 last:mb-0">
+                    <ProcessCard
+                      sipoc={sipoc}
+                      setorNome={setorNome}
+                      faseRows={fasesMap[sipoc.id] ?? []}
+                      consultorId={consultorId}
+                      onFaseUpdate={onFaseUpdate}
+                      onSipocUpdate={onSipocUpdate}
+                      onParecer={onParecer}
+                      onHistorico={onHistorico}
+                    />
+                  </div>
+                ))}
+              </div>
+            ))
+          ) : (
+            processos.map(sipoc => (
+              <ProcessCard
+                key={sipoc.id}
+                sipoc={sipoc}
+                setorNome={sipoc.setor_nome ?? ''}
+                faseRows={fasesMap[sipoc.id] ?? []}
+                consultorId={consultorId}
+                onFaseUpdate={onFaseUpdate}
+                onSipocUpdate={onSipocUpdate}
+                onParecer={onParecer}
+                onHistorico={onHistorico}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
@@ -921,28 +938,15 @@ export default function BpmnTab({ clienteId, consultorId }) {
     setParecerModal(null)
   }
 
-  const bySetor = useMemo(() => {
-    const map = new Map()
+  const byFase = useMemo(() => {
+    const map = {}
     for (const s of sipocs) {
-      const key = s.setor_nome ?? 'Geral'
-      if (!map.has(key)) map.set(key, { setorId: s.setor_id ?? null, processos: [] })
-      map.get(key).processos.push(s)
+      const fase = s.bpmn_fase_atual ?? 'mapeamento_as_is'
+      if (!map[fase]) map[fase] = []
+      map[fase].push(s)
     }
-    return Array.from(map.entries()) // [setorNome, { setorId, processos }]
+    return map
   }, [sipocs])
-
-  const metrics = useMemo(() => {
-    let emAndamento = 0
-    let aguardandoValidacao = 0
-    let concluidos = 0
-    for (const s of sipocs) {
-      const ativa = getFaseAtiva(fasesMap[s.id] ?? [])
-      if (ativa?.status === 'em_andamento') emAndamento++
-      if (s.bpmn_fase_atual === 'validacao')  aguardandoValidacao++
-      if (s.bpmn_fase_atual === 'concluido')  concluidos++
-    }
-    return { total: sipocs.length, emAndamento, aguardandoValidacao, concluidos }
-  }, [sipocs, fasesMap])
 
   if (loading) {
     return (
@@ -967,21 +971,6 @@ export default function BpmnTab({ clienteId, consultorId }) {
 
   return (
     <div className="p-8 space-y-6 overflow-y-auto flex-1">
-
-      {/* Overview */}
-      <div className="grid grid-cols-4 gap-4">
-        {[
-          { label: 'Total',                value: metrics.total,                cls: 'border-slate-200 bg-white',        vCls: 'text-slate-800' },
-          { label: 'Ativos agora',         value: metrics.emAndamento,          cls: 'border-green-200 bg-green-50',     vCls: 'text-green-700' },
-          { label: 'Aguard. validação',    value: metrics.aguardandoValidacao,  cls: 'border-amber-200 bg-amber-50',     vCls: 'text-amber-700' },
-          { label: 'Concluídos',           value: metrics.concluidos,           cls: 'border-blue-200 bg-blue-50',       vCls: 'text-blue-700'  },
-        ].map(m => (
-          <div key={m.label} className={`rounded-2xl border p-4 ${m.cls}`}>
-            <p className={`text-3xl font-black tabular-nums ${m.vCls}`}>{m.value}</p>
-            <p className="text-xs text-slate-500 font-semibold mt-1">{m.label}</p>
-          </div>
-        ))}
-      </div>
 
       {/* Contestações pendentes */}
       {contestacoes.length > 0 && (
@@ -1015,7 +1004,7 @@ export default function BpmnTab({ clienteId, consultorId }) {
         </div>
       )}
 
-      {/* Content */}
+      {/* Fases */}
       {sipocs.length === 0 ? (
         <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center">
           <p className="text-sm text-slate-400">Nenhum processo cadastrado neste projeto.</p>
@@ -1023,12 +1012,11 @@ export default function BpmnTab({ clienteId, consultorId }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {bySetor.map(([setorNome, { setorId, processos }]) => (
-            <SetorGroup
-              key={setorNome}
-              setorNome={setorNome}
-              setorId={setorId}
-              processos={processos}
+          {FASE_ORDER.map(fase => (
+            <FaseSection
+              key={fase}
+              fase={fase}
+              processos={byFase[fase] ?? []}
               fasesMap={fasesMap}
               consultorId={consultorId}
               onFaseUpdate={handleFaseUpdate}
