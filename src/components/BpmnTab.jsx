@@ -50,7 +50,7 @@ const FASE_CFG = {
 const FASE_PROXIMA = {
   mapeamento_as_is: { fase: 'revisao',   label: 'Avançar para Revisão' },
   revisao:          { fase: 'validacao', label: 'Enviar para Validação' },
-  retrabalho:       { fase: 'revisao',   label: 'Avançar para Revisão' },
+  retrabalho:       { fase: 'concluido', label: 'Concluir processo' },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -285,8 +285,15 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
   const [dataPrev,    setDataPrev]    = useState(sipoc.bpmn_data_prevista ?? '')
   const [responsavel, setResponsavel] = useState(sipoc.bpmn_responsavel ?? '')
   const [savedOk,     setSavedOk]     = useState(false)
+  const [,            forceRender]    = useState(0)
 
   const isRunning = faseAtiva?.status === 'em_andamento'
+
+  useEffect(() => {
+    if (!isRunning) return
+    const id = setInterval(() => forceRender(n => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [isRunning])
   const isPaused  = faseAtiva?.status === 'pausado'
   const elapsed   = calcularTempo(faseAtiva)
   const proxima   = FASE_PROXIMA[faseAtual]
@@ -876,7 +883,6 @@ export default function BpmnTab({ clienteId, consultorId }) {
   const [fasesMap,      setFasesMap]      = useState({})
   const [loading,       setLoading]       = useState(true)
   const [error,         setError]         = useState(null)
-  const [ticking,       setTicking]       = useState(0)   // drives live timer re-renders
   const [parecerModal,  setParecerModal]  = useState(null) // sipoc | null
   const [historicoModal,setHistoricoModal]= useState(null) // sipoc | null
   const [contestacoes,  setContestacoes]  = useState([])
@@ -915,12 +921,6 @@ export default function BpmnTab({ clienteId, consultorId }) {
       .catch(() => {})
       .finally(() => setContestLoad(false))
   }, [clienteId])
-
-  // Tick every second to drive live timers
-  useEffect(() => {
-    const id = setInterval(() => setTicking(t => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [])
 
   const handleFaseUpdate = (sipocId, updatedRow) => {
     setFasesMap(prev => {
@@ -976,7 +976,7 @@ export default function BpmnTab({ clienteId, consultorId }) {
       if (s.bpmn_fase_atual === 'concluido')  concluidos++
     }
     return { total: sipocs.length, emAndamento, aguardandoValidacao, concluidos }
-  }, [sipocs, fasesMap, ticking]) // ticking ensures metrics update live
+  }, [sipocs, fasesMap])
 
   if (loading) {
     return (
