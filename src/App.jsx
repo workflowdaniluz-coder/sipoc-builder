@@ -646,29 +646,44 @@ function AppInner() {
       // Página pública de agendamento — não requer auth
       if (agendarToken) { setAppMode('agendar'); return; }
 
-      // Consultor autenticado tem sempre prioridade
-      const { data: { session: s } } = await supabase.auth.getSession();
-      if (s) { setSession(s); setAppMode('consultant'); return; }
-
-      // Só verifica token de cliente se não houver sessão de consultor
       const params = new URLSearchParams(window.location.search);
       const tokenFromUrl = params.get('t');
+      const { data: { session: s } } = await supabase.auth.getSession();
+
+      // Token de cliente explícito na URL tem prioridade sobre sessão de consultor.
+      // Se o consultor estiver logado, não persiste no localStorage (preview temporário).
       if (tokenFromUrl) {
-        localStorage.setItem('sipoc_client_token', tokenFromUrl);
         window.history.replaceState({}, '', window.location.pathname);
-      }
-      const saved = localStorage.getItem('sipoc_client_token');
-      if (saved) {
+        if (!s) localStorage.setItem('sipoc_client_token', tokenFromUrl);
         try {
-          const td = await buscarSetorPorToken(saved);
+          const td = await buscarSetorPorToken(tokenFromUrl);
           if (td) {
-            setClientData({ tokenId: td.id, token: saved, setorId: td.setor_id, setorNome: td.setor_nome, clienteNome: td.cliente_nome, has_senha: td.has_senha });
+            setClientData({ tokenId: td.id, token: tokenFromUrl, setorId: td.setor_id, setorNome: td.setor_nome, clienteNome: td.cliente_nome, has_senha: td.has_senha });
             if (!td.has_senha) setSenhaVerificada(true);
             setAppMode('client'); return;
           }
         } catch { }
-        localStorage.removeItem('sipoc_client_token');
+        if (!s) localStorage.removeItem('sipoc_client_token');
       }
+
+      // Token salvo localmente (cliente sem sessão retomando conversa)
+      if (!s) {
+        const saved = localStorage.getItem('sipoc_client_token');
+        if (saved) {
+          try {
+            const td = await buscarSetorPorToken(saved);
+            if (td) {
+              setClientData({ tokenId: td.id, token: saved, setorId: td.setor_id, setorNome: td.setor_nome, clienteNome: td.cliente_nome, has_senha: td.has_senha });
+              if (!td.has_senha) setSenhaVerificada(true);
+              setAppMode('client'); return;
+            }
+          } catch { }
+          localStorage.removeItem('sipoc_client_token');
+        }
+      }
+
+      // Consultor autenticado
+      if (s) { setSession(s); setAppMode('consultant'); return; }
 
       // Token de validação BPMN por processo (?vt=)
       const validacaoToken = params.get('vt');
