@@ -23,6 +23,17 @@ export const defaultProcess = {
   rasci: { r: [], a: [], s: [], c: [], i: [] },
 }
 
+function newProcess(id = 'p1', overrides = {}) {
+  return {
+    ...defaultProcess,
+    ...overrides,
+    id,
+    suppliers: [], inputs: [], outputs: [], customers: [],
+    ferramentas: [],
+    rasci: { r: [], a: [], s: [], c: [], i: [] },
+  }
+}
+
 function buildEmptyClienteResposta(processo) {
   const inputs = {}; const outputs = {}
   ;(processo.inputs  || []).filter(s => s.trim()).forEach(name => {
@@ -84,7 +95,10 @@ export function BuilderProvider({ children }) {
     processes.reduce((acc, p) => { (acc[p.setor] ??= []).push(p); return acc; }, {}), [processes])
 
   const globalOutputs = useMemo(() =>
-    processes.flatMap(p => p.outputs.filter(o => o.trim()).map(o => ({ processo: p.name, output: o }))), [processes])
+    processes.flatMap(p => p.outputs.filter(o => o.trim()).map(o => ({
+      output: o,
+      label: `${o} [${p.name}] [${p.setor}]`,
+    }))), [processes])
 
   const progresso = useMemo(() => {
     const map = {}
@@ -102,10 +116,10 @@ export function BuilderProvider({ children }) {
         const resp = {}
         procs.forEach(p => { if (p.setor_id && p.setor_responsavel) resp[p.setor_id] = p.setor_responsavel })
         setSetorResponsavel(resp)
-      } else { setProcesses([defaultProcess]); setActiveProcessId('p1') }
+      } else { setProcesses([newProcess()]); setActiveProcessId('p1') }
     } catch (err) {
       alert('❌ ' + err.message)
-      setProcesses([defaultProcess]); setActiveProcessId('p1')
+      setProcesses([newProcess()]); setActiveProcessId('p1')
     } finally { setIsLoadingProcesses(false) }
   }
 
@@ -175,24 +189,22 @@ export function BuilderProvider({ children }) {
     const remaining = processes.filter(p => p.id !== current.id)
     if (remaining.length === 0) {
       const newId = `p${Date.now()}`
-      setProcesses([{ ...defaultProcess, id: newId }]); setActiveProcessId(newId)
+      setProcesses([newProcess(newId)]); setActiveProcessId(newId)
     } else {
       setProcesses(remaining); setActiveProcessId(remaining[0].id)
     }
     setSyncStatus(prev => { const s = { ...prev }; delete s[current.id]; return s })
   }
 
-  const upd = (f, v) => {
+  const updProc = (fn) => {
     markDraft()
-    const u = [...processes]; u[activeProcessIndex][f] = v; setProcesses(u)
+    setProcesses(prev => prev.map((p, i) => i === activeProcessIndex ? fn(p) : p))
   }
-  const updRasci = (l, tags) => {
-    markDraft()
-    const u = [...processes]; u[activeProcessIndex].rasci[l] = tags; setProcesses(u)
-  }
-  const updArr = (f, i, v) => { markDraft(); const u = [...processes]; u[activeProcessIndex][f][i] = v; setProcesses(u) }
-  const rmArr  = (f, i)    => { markDraft(); const u = [...processes]; if (u[activeProcessIndex][f].length > 1) { u[activeProcessIndex][f].splice(i,1); setProcesses(u) } }
-  const addArr = (f)       => { markDraft(); const u = [...processes]; u[activeProcessIndex][f] = [...u[activeProcessIndex][f], '']; setProcesses(u) }
+  const upd     = (f, v)    => updProc(p => ({ ...p, [f]: v }))
+  const updRasci = (l, tags) => updProc(p => ({ ...p, rasci: { ...p.rasci, [l]: tags } }))
+  const updArr  = (f, i, v) => updProc(p => ({ ...p, [f]: p[f].map((x, j) => j === i ? v : x) }))
+  const rmArr   = (f, i)    => { if (processes[activeProcessIndex]?.[f]?.length > 1) updProc(p => ({ ...p, [f]: p[f].filter((_, j) => j !== i) })) }
+  const addArr  = (f)       => updProc(p => ({ ...p, [f]: [...p[f], ''] }))
 
   const handleVinculoAdd = (newVinculo) => setVinculos(prev => [...prev, newVinculo])
   const handleVinculoRemove = (vinculoId) => {
@@ -232,10 +244,7 @@ export function BuilderProvider({ children }) {
   const handleAdicionarProcesso = (activeSetor) => {
     if (!activeSetor?.id) return
     const newId = `p${Date.now()}`
-    setProcesses(prev => [...prev, {
-      ...defaultProcess, id: newId, supabase_id: null,
-      name: 'Novo Processo', setor: activeSetor.nome, setor_id: activeSetor.id,
-    }])
+    setProcesses(prev => [...prev, newProcess(newId, { setor: activeSetor.nome, setor_id: activeSetor.id })])
     setActiveProcessId(newId)
   }
 

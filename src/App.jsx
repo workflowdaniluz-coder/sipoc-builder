@@ -339,10 +339,6 @@ const SIPOCColumn = ({ col, items, globalOutputs, onUpdate, sipocId, sipocItems,
     if (e.key === 'Enter' || e.key === ',') {
       e.preventDefault();
       commit(inputVal);
-    } else if (e.key === 'Backspace' && !inputVal && chips.length > 0) {
-      const chip = chips[chips.length - 1];
-      onChipRemove(col.key, chip);
-      onUpdate(col.key, chips.slice(0, -1));
     }
   };
 
@@ -440,7 +436,7 @@ const SIPOCColumn = ({ col, items, globalOutputs, onUpdate, sipocId, sipocItems,
         />
         {col.isInput && (
           <datalist id="global-outputs-list">
-            {(globalOutputs || []).map((o, i) => <option key={i} value={o.output} />)}
+            {(globalOutputs || []).map((o, i) => <option key={i} value={o.label} />)}
           </datalist>
         )}
       </div>
