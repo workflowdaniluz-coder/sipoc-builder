@@ -49,7 +49,6 @@ const FASE_CFG = {
 
 const FASE_PROXIMA = {
   mapeamento_as_is: { fase: 'revisao',   label: 'Avançar para Revisão' },
-  revisao:          { fase: 'validacao', label: 'Enviar para Validação' },
   retrabalho:       { fase: 'concluido', label: 'Concluir processo' },
 }
 
@@ -688,6 +687,60 @@ function ContestacaoCard({ contestacao, consultorId, onDecidido }) {
   )
 }
 
+// ── RevisaoSetorPanel ─────────────────────────────────────────────────────────
+
+function RevisaoSetorPanel({ setorNome, processos, fasesMap, consultorId, onSipocUpdate }) {
+  const [sending, setSending] = useState(false)
+
+  const revisados = processos.filter(s =>
+    (fasesMap[s.id] ?? []).some(r => r.fase === 'revisao' && r.status === 'concluido')
+  ).length
+  const total = processos.length
+  const podeEnviar = revisados === total && total > 0
+
+  const handleEnviar = async () => {
+    if (!window.confirm(`Enviar ${total} processo${total > 1 ? 's' : ''} do setor "${setorNome}" para validação?`)) return
+    setSending(true)
+    try {
+      for (const sipoc of processos) {
+        const row = await avancarFase(sipoc.id, 'validacao', consultorId)
+        onSipocUpdate(sipoc.id, { bpmn_fase_atual: 'validacao', bpmn_status: 'enviado_validacao' }, row)
+      }
+    } catch (err) {
+      alert('❌ ' + err.message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 mb-3 px-1">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{setorNome}</span>
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full
+          ${podeEnviar ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+          {revisados}/{total} concluídos
+        </span>
+      </div>
+      {podeEnviar && (
+        <button
+          onClick={handleEnviar}
+          disabled={sending}
+          className="px-3 py-1 rounded-lg bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e]
+            font-bold text-[10px] transition-all disabled:opacity-50 flex items-center gap-1"
+        >
+          {sending ? 'Enviando…' : 'Enviar para validação'}
+          {!sending && (
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
+  )
+}
+
 // ── ValidacaoSetorPanel ───────────────────────────────────────────────────────
 
 function ValidacaoSetorPanel({ setorNome, setorId }) {
@@ -784,7 +837,7 @@ function FaseSection({ fase, processos, fasesMap, consultorId, onFaseUpdate, onS
 
   if (processos.length === 0) return null
 
-  const setorGroups = fase === 'validacao'
+  const setorGroups = (fase === 'validacao' || fase === 'revisao')
     ? Object.entries(processos.reduce((acc, p) => {
         const k = p.setor_nome ?? 'Geral'
         if (!acc[k]) acc[k] = { setorId: p.setor_id ?? null, processos: [] }
@@ -821,7 +874,17 @@ function FaseSection({ fase, processos, fasesMap, consultorId, onFaseUpdate, onS
           {setorGroups ? (
             setorGroups.map(([setorNome, { setorId, processos: setorProcs }]) => (
               <div key={setorNome}>
-                <ValidacaoSetorPanel setorNome={setorNome} setorId={setorId} />
+                {fase === 'revisao' ? (
+                  <RevisaoSetorPanel
+                    setorNome={setorNome}
+                    processos={setorProcs}
+                    fasesMap={fasesMap}
+                    consultorId={consultorId}
+                    onSipocUpdate={onSipocUpdate}
+                  />
+                ) : (
+                  <ValidacaoSetorPanel setorNome={setorNome} setorId={setorId} />
+                )}
                 {setorProcs.map(sipoc => (
                   <div key={sipoc.id} className="mb-3 last:mb-0">
                     <ProcessCard
