@@ -55,17 +55,6 @@ const FASE_PROXIMA = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function calcularTempo(faseRow) {
-  if (!faseRow) return 0
-  let total = faseRow.duracao_segundos ?? 0
-  const eventos = faseRow.eventos ?? []
-  const last = eventos[eventos.length - 1]
-  if (last && (last.tipo === 'start' || last.tipo === 'resume')) {
-    total += Math.floor((Date.now() - new Date(last.em).getTime()) / 1000)
-  }
-  return total
-}
-
 function formatTempo(s) {
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
@@ -285,17 +274,8 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
   const [dataPrev,    setDataPrev]    = useState(sipoc.bpmn_data_prevista ?? '')
   const [responsavel, setResponsavel] = useState(sipoc.bpmn_responsavel ?? '')
   const [savedOk,     setSavedOk]     = useState(false)
-  const [,            forceRender]    = useState(0)
-
   const isRunning = faseAtiva?.status === 'em_andamento'
-
-  useEffect(() => {
-    if (!isRunning) return
-    const id = setInterval(() => forceRender(n => n + 1), 1000)
-    return () => clearInterval(id)
-  }, [isRunning])
   const isPaused  = faseAtiva?.status === 'pausado'
-  const elapsed   = calcularTempo(faseAtiva)
   const proxima   = FASE_PROXIMA[faseAtual]
 
   const wrap = async (fn) => {
@@ -459,29 +439,23 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
         </div>
       )}
 
-      {/* Timer block (only for phases with timer support) */}
+      {/* Status + controls (only for phases with timer support) */}
       {faseCfg.hasTimer && (
         <div className="flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3">
-          <div>
-            <p className="font-mono text-2xl font-black text-[#16253e] tabular-nums leading-none">
-              {formatTempo(elapsed)}
-            </p>
-            <p className="text-[10px] text-slate-400 mt-0.5 font-medium">
-              {isRunning ? '● Em andamento' : isPaused ? '⏸ Pausado' : faseAtiva ? '■ Encerrado' : '○ Não iniciado'}
-            </p>
-          </div>
+          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full
+            ${isRunning ? 'bg-green-100 text-green-700' : isPaused ? 'bg-amber-100 text-amber-700' : faseAtiva?.status === 'concluido' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-500'}`}
+          >
+            {isRunning ? 'Em andamento' : isPaused ? 'Pausado' : faseAtiva?.status === 'concluido' ? 'Concluído' : 'Não iniciado'}
+          </span>
           <div className="flex items-center gap-2">
             {(!faseAtiva || faseAtiva.status === 'concluido') && (
               <button
                 onClick={handleIniciar}
                 disabled={loading}
-                title="Iniciar"
-                className="w-9 h-9 rounded-full bg-[#ecbf03] hover:bg-[#d4ab02] flex items-center justify-center
+                className="px-3 py-1.5 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] text-xs font-bold
                   transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30"
               >
-                <svg className="w-4 h-4 text-[#16253e] ml-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
-                </svg>
+                Iniciar
               </button>
             )}
             {isRunning && (
@@ -489,22 +463,18 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
                 <button
                   onClick={handlePausar}
                   disabled={loading}
-                  title="Pausar"
-                  className="w-9 h-9 rounded-full border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center transition-all disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50
+                    text-slate-600 text-xs font-bold transition-all disabled:opacity-50"
                 >
-                  <svg className="w-4 h-4 text-slate-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
-                  </svg>
+                  Pausar
                 </button>
                 <button
                   onClick={handlePararTimer}
                   disabled={loading}
-                  title="Encerrar timer"
-                  className="w-9 h-9 rounded-full border border-slate-200 bg-white hover:bg-red-50 hover:border-red-200 flex items-center justify-center transition-all disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-red-50
+                    hover:border-red-200 hover:text-red-600 text-slate-500 text-xs font-bold transition-all disabled:opacity-50"
                 >
-                  <svg className="w-4 h-4 text-slate-400 hover:text-red-500" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
-                  </svg>
+                  Concluir
                 </button>
               </>
             )}
@@ -513,23 +483,18 @@ function ProcessCard({ sipoc, faseRows, consultorId, onFaseUpdate, onSipocUpdate
                 <button
                   onClick={handleRetomar}
                   disabled={loading}
-                  title="Retomar"
-                  className="w-9 h-9 rounded-full bg-[#ecbf03] hover:bg-[#d4ab02] flex items-center justify-center
+                  className="px-3 py-1.5 rounded-xl bg-[#ecbf03] hover:bg-[#d4ab02] text-[#16253e] text-xs font-bold
                     transition-all disabled:opacity-50 shadow-sm shadow-[#ecbf03]/30"
                 >
-                  <svg className="w-4 h-4 text-[#16253e] ml-0.5" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M6.3 2.841A1.5 1.5 0 004 4.11V15.89a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
-                  </svg>
+                  Retomar
                 </button>
                 <button
                   onClick={handlePararTimer}
                   disabled={loading}
-                  title="Encerrar timer"
-                  className="w-9 h-9 rounded-full border border-slate-200 bg-white hover:bg-red-50 hover:border-red-200 flex items-center justify-center transition-all disabled:opacity-50"
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-red-50
+                    hover:border-red-200 hover:text-red-600 text-slate-500 text-xs font-bold transition-all disabled:opacity-50"
                 >
-                  <svg className="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clipRule="evenodd" />
-                  </svg>
+                  Concluir
                 </button>
               </>
             )}
