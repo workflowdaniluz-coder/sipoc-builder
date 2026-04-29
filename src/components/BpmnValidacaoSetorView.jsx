@@ -58,6 +58,7 @@ export function ErroTokenView({ mensagem }) {
 function ProcessCard({ processo, token, resposta, onChange }) {
   const acao = resposta?.acao ?? null
   const [zoom, setZoom] = useState(false)
+  const [imgError, setImgError] = useState(false)
 
   const borderCls = acao === 'aprovado'
     ? 'border-l-4 border-l-green-500'
@@ -75,32 +76,43 @@ function ProcessCard({ processo, token, resposta, onChange }) {
 
         {/* Diagrama */}
         <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50 mb-4 relative group">
-          <img
-            src={`/api/bpmn-imagem?sipoc_id=${processo.id}&vb=${encodeURIComponent(token)}`}
-            alt={`Diagrama BPMN — ${processo.nome}`}
-            className="w-full h-auto block cursor-zoom-in"
-            onClick={() => setZoom(true)}
-            onError={e => {
-              e.currentTarget.style.display = 'none'
-              e.currentTarget.nextSibling.style.display = 'flex'
-              e.currentTarget.nextSibling.nextSibling.style.display = 'none'
-            }}
-          />
-          <div className="hidden items-center justify-center py-8">
-            <p className="text-xs text-slate-400">Diagrama não disponível.</p>
-          </div>
-          <button
-            onClick={() => setZoom(true)}
-            className="absolute bottom-2 right-2 bg-white/80 hover:bg-white border border-slate-200
-              rounded-lg px-2 py-1 text-xs text-slate-600 font-medium flex items-center gap-1
-              opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0zm-2 0a4 4 0 1 1-8 0 4 4 0 0 1 8 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 9v4m-2-2h4" />
-            </svg>
-            Ampliar
-          </button>
+          {imgError ? (
+            <div className="flex flex-col items-center justify-center py-8 gap-2">
+              <p className="text-xs text-slate-400">Visualização não disponível.</p>
+              {processo.driveUrl && (
+                <a
+                  href={processo.driveUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-[#16253e] underline underline-offset-2"
+                >
+                  Abrir diagrama →
+                </a>
+              )}
+            </div>
+          ) : (
+            <>
+              <img
+                src={`/api/bpmn-imagem?sipoc_id=${processo.id}&vb=${encodeURIComponent(token)}`}
+                alt={`Diagrama BPMN — ${processo.nome}`}
+                className="w-full h-auto block cursor-zoom-in"
+                onClick={() => setZoom(true)}
+                onError={() => setImgError(true)}
+              />
+              <button
+                onClick={() => setZoom(true)}
+                className="absolute bottom-2 right-2 bg-white/80 hover:bg-white border border-slate-200
+                  rounded-lg px-2 py-1 text-xs text-slate-600 font-medium flex items-center gap-1
+                  opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0zm-2 0a4 4 0 1 1-8 0 4 4 0 0 1 8 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 9v4m-2-2h4" />
+                </svg>
+                Ampliar
+              </button>
+            </>
+          )}
         </div>
         {zoom && (
           <ImageZoomModal
