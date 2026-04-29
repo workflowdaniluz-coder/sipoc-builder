@@ -703,20 +703,8 @@ function AppInner() {
       const vbToken = params.get('vb');
       if (vbToken) {
         window.history.replaceState({}, '', window.location.pathname);
-        try {
-          const resp = await fetch(`/api/validar-bpmn/setor?vb=${encodeURIComponent(vbToken)}`);
-          const data = await resp.json();
-          if (data.ok) {
-            setValidacaoSetorData({ ...data, token: vbToken });
-            setAppMode('validacao_bpmn_setor');
-          } else {
-            setErroTokenMsg(data.error ?? 'Token inválido ou expirado.');
-            setAppMode('validacao_bpmn_setor_erro');
-          }
-        } catch {
-          setErroTokenMsg('Não foi possível validar o link. Tente novamente.');
-          setAppMode('validacao_bpmn_setor_erro');
-        }
+        setValidacaoSetorData({ initialToken: vbToken });
+        setAppMode('validacao_bpmn_setor');
         return;
       }
 

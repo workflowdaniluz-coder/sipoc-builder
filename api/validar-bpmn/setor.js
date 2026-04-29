@@ -63,8 +63,10 @@ export default async function handler(req, res) {
   // ── POST ──────────────────────────────────────────────────────────────
 
   if (req.method === 'POST') {
-    const { token, respostas, comentarioGeral } = req.body ?? {}
+    const { token, respostas, comentarioGeral, nomeValidador, cargoValidador } = req.body ?? {}
     if (!token) return res.status(400).json({ ok: false, error: 'token é obrigatório' })
+    if (!nomeValidador?.trim()) return res.status(400).json({ ok: false, error: 'nome do validador é obrigatório' })
+    if (!cargoValidador?.trim()) return res.status(400).json({ ok: false, error: 'cargo do validador é obrigatório' })
     if (!Array.isArray(respostas) || !respostas.length)
       return res.status(400).json({ ok: false, error: 'respostas é obrigatório' })
 
@@ -105,13 +107,14 @@ export default async function handler(req, res) {
       const { error: insertErr } = await supabase.from('bpmn_validacao_cliente').insert({
         sipoc_id: r.sipoc_id, token_acesso_id: tokenData.id,
         acao: r.acao, comentario: r.comentario?.trim() ?? null,
+        nome_validador: nomeValidador.trim(), cargo_validador: cargoValidador.trim(),
       })
       if (insertErr) return res.status(500).json({ ok: false, error: `Erro ao registrar resposta: ${insertErr.message}` })
 
       if (r.acao === 'aprovado') {
         const { error: sipocErr } = await supabase.from('sipocs').update({
           bpmn_fase_atual: 'concluido', bpmn_status: 'validado', bpmn_validado_em: now,
-          bpmn_validado_por: tokenData.setor_nome,
+          bpmn_validado_por: `${nomeValidador.trim()} (${tokenData.setor_nome})`,
           bpmn_validacao_comentario: comentarioGeral?.trim() ?? null,
         }).eq('id', r.sipoc_id)
         if (sipocErr) return res.status(500).json({ ok: false, error: `Erro ao atualizar processo: ${sipocErr.message}` })
