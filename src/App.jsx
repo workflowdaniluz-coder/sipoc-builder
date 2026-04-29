@@ -646,8 +646,9 @@ function AppInner() {
       const tokenFromUrl = params.get('t');
       const { data: { session: s } } = await supabase.auth.getSession();
 
-      // Token de cliente explícito na URL tem prioridade sobre sessão de consultor.
-      // Se o consultor estiver logado, não persiste no localStorage (preview temporário).
+      // Links explícitos na URL têm prioridade sobre sessão e localStorage.
+
+      // Token de chat do cliente (?t=)
       if (tokenFromUrl) {
         window.history.replaceState({}, '', window.location.pathname);
         if (!s) localStorage.setItem('sipoc_client_token', tokenFromUrl);
@@ -662,33 +663,14 @@ function AppInner() {
         if (!s) localStorage.removeItem('sipoc_client_token');
       }
 
-      // Token salvo localmente (cliente sem sessão retomando conversa)
-      if (!s) {
-        const saved = localStorage.getItem('sipoc_client_token');
-        if (saved) {
-          try {
-            const td = await buscarSetorPorToken(saved);
-            if (td) {
-              setClientData({ tokenId: td.id, token: saved, setorId: td.setor_id, setorNome: td.setor_nome, clienteNome: td.cliente_nome, has_senha: td.has_senha });
-              if (!td.has_senha) setSenhaVerificada(true);
-              setAppMode('client'); return;
-            }
-          } catch { }
-          localStorage.removeItem('sipoc_client_token');
-        }
-      }
-
-      // Consultor autenticado
-      if (s) { setSession(s); setAppMode('consultant'); return; }
-
       // Token de validação BPMN por processo (?vt=)
       const validacaoToken = params.get('vt');
       if (validacaoToken) {
+        window.history.replaceState({}, '', window.location.pathname);
         try {
           const resp = await fetch(`/api/validar-bpmn/processo?token=${encodeURIComponent(validacaoToken)}`);
           const data = await resp.json();
           if (data.ok && data.processo) {
-            window.history.replaceState({}, '', window.location.pathname);
             setValidacaoData({ token: validacaoToken, ...data.processo });
             setAppMode('validacao_bpmn');
             return;
@@ -737,6 +719,25 @@ function AppInner() {
         }
         return;
       }
+
+      // Token salvo localmente (cliente sem sessão retomando conversa de chat)
+      if (!s) {
+        const saved = localStorage.getItem('sipoc_client_token');
+        if (saved) {
+          try {
+            const td = await buscarSetorPorToken(saved);
+            if (td) {
+              setClientData({ tokenId: td.id, token: saved, setorId: td.setor_id, setorNome: td.setor_nome, clienteNome: td.cliente_nome, has_senha: td.has_senha });
+              if (!td.has_senha) setSenhaVerificada(true);
+              setAppMode('client'); return;
+            }
+          } catch { }
+          localStorage.removeItem('sipoc_client_token');
+        }
+      }
+
+      // Consultor autenticado
+      if (s) { setSession(s); setAppMode('consultant'); return; }
 
       setAppMode('auth');
     };
