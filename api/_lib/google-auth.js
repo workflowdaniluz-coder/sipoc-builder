@@ -1,6 +1,33 @@
 import { createClient } from '@supabase/supabase-js'
 import { decrypt } from './crypto.js'
 
+export async function getServiceAccountToken(scope = 'https://www.googleapis.com/auth/drive.readonly') {
+  const { createSign } = await import('node:crypto')
+  const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
+  const now = Math.floor(Date.now() / 1000)
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url')
+  const body = Buffer.from(JSON.stringify({
+    iss: creds.client_email, scope, aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600, iat: now,
+  })).toString('base64url')
+  const unsigned = `${header}.${body}`
+  const sign = createSign('RSA-SHA256')
+  sign.update(unsigned)
+  const jwt = `${unsigned}.${sign.sign(creds.private_key, 'base64url')}`
+
+  const resp = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  })
+  const data = await resp.json()
+  if (!data.access_token) throw new Error('Falha na service account: ' + JSON.stringify(data))
+  return data.access_token
+}
+
 export async function getAccessTokenForConsultor(consultorId) {
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
 
