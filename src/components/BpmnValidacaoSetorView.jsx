@@ -2,18 +2,59 @@ import { useState, useEffect } from 'react'
 
 // ── ImageZoomModal ────────────────────────────────────────────────────────────
 
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 4
+const ZOOM_STEP = 0.5
+
 function ImageZoomModal({ src, alt, onClose }) {
+  const [scale, setScale] = useState(1)
+
   useEffect(() => {
-    const onKey = e => { if (e.key === 'Escape') onClose() }
+    const onKey = e => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === '+' || e.key === '=') setScale(s => Math.min(s + ZOOM_STEP, ZOOM_MAX))
+      if (e.key === '-') setScale(s => Math.max(s - ZOOM_STEP, ZOOM_MIN))
+      if (e.key === '0') setScale(1)
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
       onClick={onClose}
     >
+      {/* Controles */}
+      <div
+        className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-1
+          bg-black/60 backdrop-blur-sm rounded-2xl px-3 py-2"
+        onClick={e => e.stopPropagation()}
+      >
+        <button
+          onClick={() => setScale(s => Math.max(s - ZOOM_STEP, ZOOM_MIN))}
+          disabled={scale <= ZOOM_MIN}
+          className="w-9 h-9 rounded-xl text-white hover:bg-white/20 flex items-center justify-center
+            transition-colors disabled:opacity-30 text-lg font-bold"
+          aria-label="Diminuir"
+        >−</button>
+        <button
+          onClick={() => setScale(1)}
+          className="px-3 h-9 rounded-xl text-white hover:bg-white/20 text-xs font-semibold
+            transition-colors min-w-[3.5rem]"
+        >
+          {Math.round(scale * 100)}%
+        </button>
+        <button
+          onClick={() => setScale(s => Math.min(s + ZOOM_STEP, ZOOM_MAX))}
+          disabled={scale >= ZOOM_MAX}
+          className="w-9 h-9 rounded-xl text-white hover:bg-white/20 flex items-center justify-center
+            transition-colors disabled:opacity-30 text-lg font-bold"
+          aria-label="Ampliar"
+        >+</button>
+      </div>
+
+      {/* Fechar */}
       <button
         onClick={onClose}
         className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20
@@ -24,13 +65,20 @@ function ImageZoomModal({ src, alt, onClose }) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
-      <img
-        src={src}
-        alt={alt}
-        className="max-w-full max-h-full object-contain rounded-xl shadow-2xl"
-        onClick={e => e.stopPropagation()}
-        style={{ touchAction: 'pinch-zoom' }}
-      />
+
+      {/* Imagem — scroll quando maior que a tela */}
+      <div
+        className="overflow-auto w-full h-full flex items-center justify-center p-16"
+        onClick={onClose}
+      >
+        <img
+          src={src}
+          alt={alt}
+          className="rounded-xl shadow-2xl transition-transform duration-150 origin-center"
+          style={{ transform: `scale(${scale})`, touchAction: 'pinch-zoom', maxWidth: 'none' }}
+          onClick={e => e.stopPropagation()}
+        />
+      </div>
     </div>
   )
 }
