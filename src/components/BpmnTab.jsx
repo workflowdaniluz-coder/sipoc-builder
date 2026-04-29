@@ -689,7 +689,7 @@ function ContestacaoCard({ contestacao, consultorId, onDecidido }) {
 
 // ── RevisaoSetorPanel ─────────────────────────────────────────────────────────
 
-function RevisaoSetorPanel({ setorNome, processos, fasesMap, consultorId, onSipocUpdate }) {
+function RevisaoSetorPanel({ setorNome, setorId, processos, fasesMap, consultorId, onSipocUpdate }) {
   const [sending, setSending] = useState(false)
 
   const revisados = processos.filter(s =>
@@ -706,6 +706,9 @@ function RevisaoSetorPanel({ setorNome, processos, fasesMap, consultorId, onSipo
         const row = await avancarFase(sipoc.id, 'validacao', consultorId)
         onSipocUpdate(sipoc.id, { bpmn_fase_atual: 'validacao', bpmn_status: 'enviado_validacao' }, row)
       }
+      const tokenObj = await gerarTokenValidacaoBpmn(setorId)
+      await navigator.clipboard.writeText(tokenObj.url)
+      alert(`✅ Processos enviados para validação!\n\nLink copiado:\n${tokenObj.url}`)
     } catch (err) {
       alert('❌ ' + err.message)
     } finally {
@@ -877,6 +880,7 @@ function FaseSection({ fase, processos, fasesMap, consultorId, onFaseUpdate, onS
                 {fase === 'revisao' ? (
                   <RevisaoSetorPanel
                     setorNome={setorNome}
+                    setorId={setorId}
                     processos={setorProcs}
                     fasesMap={fasesMap}
                     consultorId={consultorId}

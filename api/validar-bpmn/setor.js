@@ -6,6 +6,13 @@
 
 import { getAdminClient } from '../_lib/supabase-admin.js'
 
+function toEmbedUrl(driveUrl) {
+  if (!driveUrl) return null
+  const m = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/)
+  if (!m) return null
+  return `https://drive.google.com/file/d/${m[1]}/preview`
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
@@ -36,7 +43,7 @@ export default async function handler(req, res) {
       .from('setores').select('clientes ( id, nome )').eq('id', tokenData.setor_id).single()
     const { data: sipocs } = await supabase
       .from('sipocs')
-      .select('id, nome_processo, bpmn_embed_url, bpmn_drive_url, bpmn_status')
+      .select('id, nome_processo, bpmn_drive_url, bpmn_status')
       .eq('setor_id', tokenData.setor_id)
       .eq('bpmn_fase_atual', 'validacao')
 
@@ -46,7 +53,9 @@ export default async function handler(req, res) {
       clienteId: setorData?.clientes?.id ?? null, jaRespondido: !!tokenData.usado_em,
       processos: (sipocs ?? []).map(s => ({
         id: s.id, nome: s.nome_processo,
-        embedUrl: s.bpmn_embed_url ?? null, driveUrl: s.bpmn_drive_url ?? null, status: s.bpmn_status,
+        driveUrl: s.bpmn_drive_url ?? null,
+        embedUrl: toEmbedUrl(s.bpmn_drive_url),
+        status: s.bpmn_status,
       })),
     })
   }
