@@ -223,10 +223,17 @@ function ProcessCard({ sipoc, setorNome, faseRows, consultorId, onFaseUpdate, on
     onFaseUpdate(sipoc.id, row)
   })
 
-  // Só para o timer — usado na fase de revisão
+  // Só para o timer — usado na fase de revisão (com timer ativo)
   const handleConcluirFase = () => wrap(async () => {
     const row = await concluirFase(faseAtiva.id)
     onFaseUpdate(sipoc.id, row)
+  })
+
+  // Marca revisão como concluída sem timer ativo (inicia e conclui imediatamente para registrar)
+  const handleConcluirSemTimer = () => wrap(async () => {
+    const startRow = await iniciarFase(sipoc.id, faseAtual, consultorId)
+    const endRow = await concluirFase(startRow.id)
+    onFaseUpdate(sipoc.id, endRow)
   })
 
   // Para o timer E avança para a próxima fase — usado em mapeamento_as_is e retrabalho
@@ -395,6 +402,14 @@ function ProcessCard({ sipoc, setorNome, faseRows, consultorId, onFaseUpdate, on
               <button onClick={() => handleConcluirEAvancar('revisao')} disabled={loading}
                 className="px-3 py-1.5 rounded-xl bg-[#16253e] hover:bg-[#0d1a2b] text-white text-xs font-bold transition-all disabled:opacity-50">
                 Avançar para revisão →
+              </button>
+            )}
+
+            {/* Em revisão sem timer ativo — permite concluir sem iniciar o timer */}
+            {faseAtual === 'revisao' && !faseAtiva && !temConcluido && (
+              <button onClick={handleConcluirSemTimer} disabled={loading}
+                className="px-3 py-1.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold transition-all disabled:opacity-50">
+                Concluído
               </button>
             )}
           </div>
